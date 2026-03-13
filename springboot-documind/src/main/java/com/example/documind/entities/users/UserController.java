@@ -1,5 +1,8 @@
 package com.example.documind.entities.users;
 
+import com.example.documind.dto.requests.LoginRequest;
+import com.example.documind.dto.requests.PasswordRequest;
+import com.example.documind.dto.responses.LoginResponse;
 import com.example.documind.security.tokens.TokenService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,7 +40,7 @@ public class UserController {
             @RequestBody LoginRequest loginRequest,
             HttpServletResponse response
     ) {
-        Optional<Map<String, Object>> dataOptional = userService.login(loginRequest.getUsername(), loginRequest.getPassword());
+        Optional<Map<String, Object>> dataOptional = userService.login(loginRequest.getTelephone(), loginRequest.getEmail(), loginRequest.getPassword());
         if (dataOptional.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid username or password");
         }
@@ -111,7 +114,7 @@ public class UserController {
             @CookieValue(name = "authentication-token") String token,
             @RequestBody PasswordRequest passwordRequest
     ) {
-        boolean valid = userService.checkPassword(token, passwordRequest.getPassword());
+        boolean valid = userService.checkPassword(token, passwordRequest.getOldPassword());
         if (valid) {
             return ResponseEntity.ok("Password verified.");
         }
@@ -124,7 +127,7 @@ public class UserController {
             @RequestBody PasswordRequest passwordRequest
     ) {
 
-        boolean updated = userService.updateUserPassword(token, passwordRequest.getPassword());
+        boolean updated = userService.updateUserPassword(token, passwordRequest.getNewPassword());
         if (updated) {
             return ResponseEntity.ok("Password successfully updated.");
         }

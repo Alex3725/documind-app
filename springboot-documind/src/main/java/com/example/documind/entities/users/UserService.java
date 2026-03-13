@@ -1,5 +1,7 @@
 package com.example.documind.entities.users;
 
+import com.example.documind.configurations.globals.mappers.UserMapper;
+import com.example.documind.dto.responses.LoginResponse;
 import com.example.documind.security.tokens.Token;
 import com.example.documind.security.tokens.TokenRepository;
 import com.example.documind.security.tokens.TokenService;
@@ -14,6 +16,7 @@ import java.util.Optional;
 
 @Service
 public class UserService {
+    private final UserMapper userMapper;
     private final UserRepository userRepository;
     private final TokenRepository tokenRepository;
     private final TaskRepository taskRepository; // files.
@@ -21,7 +24,8 @@ public class UserService {
     private final TokenService tokenService;
 
     @Autowired
-    public UserService(UserRepository userRepository, TokenRepository tokenRepository, TokenService tokenService, TaskRepository  taskRepository, TaskService taskService) {
+    public UserService(UserMapper userMapper, UserRepository userRepository, TokenRepository tokenRepository, TokenService tokenService, TaskRepository  taskRepository, TaskService taskService) {
+        this.userMapper = userMapper;
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
         this.taskRepository  = taskRepository;
@@ -43,8 +47,8 @@ public class UserService {
         return false;
     }
 
-    public Optional<Map<String, Object>> login(String email, String password) {
-        User user = userRepository.findByEmailAndPassword(email, password);
+    public Optional<Map<String, Object>> login(String telephone, String email, String password) {
+        User user = userRepository.findByTelephoneOrEmailAndPassword(telephone, email, password);
         if (user == null)
             return Optional.empty();
 
@@ -53,9 +57,8 @@ public class UserService {
         return Optional.of(
                 Map.of(
                         "token", userToken.getToken(),
-                        "user", new LoginResponse(
-                                user.getTelephone(), // to-implement
-                                user.getEmail()
+                        "user", userMapper.toResponse(
+                                user
                         )
                 )
         );

@@ -114,7 +114,7 @@ public class UserController {
             @CookieValue(name = "authentication-token") String token,
             @RequestBody PasswordRequest passwordRequest
     ) {
-        boolean valid = userService.checkPassword(token, passwordRequest.getOldPassword());
+        boolean valid = userService.checkPassword(token, passwordRequest.getPassword());
         if (valid) {
             return ResponseEntity.ok("Password verified.");
         }
@@ -127,7 +127,7 @@ public class UserController {
             @RequestBody PasswordRequest passwordRequest
     ) {
 
-        boolean updated = userService.updateUserPassword(token, passwordRequest.getNewPassword());
+        boolean updated = userService.updateUserPassword(token, passwordRequest.getPassword());
         if (updated) {
             return ResponseEntity.ok("Password successfully updated.");
         }

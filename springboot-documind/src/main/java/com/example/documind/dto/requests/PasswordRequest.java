@@ -1,19 +1,13 @@
 package com.example.documind.dto.requests;
 
 public class PasswordRequest {
-    private String oldPassword;
-    private String newPassword;
+    private String password;
 
-    public PasswordRequest(String oldPassword, String newPassword) {
-        this.oldPassword = oldPassword;
-        this.newPassword = newPassword;
+    public PasswordRequest(String password) {
+        this.password = password;
     }
 
-    public String getOldPassword() {
-        return oldPassword;
-    }
-
-    public String getNewPassword() {
-        return newPassword;
+    public String getPassword() {
+        return password;
     }
 }

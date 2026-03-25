@@ -1,15 +1,18 @@
 package com.example.documind.security.tokens;
 
+import com.example.documind.configurations.exceptions.CustomException;
 import com.example.documind.entities.users.User;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import java.beans.Transient;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.util.StringUtils;
 
 @Service
 public class TokenService {
@@ -29,16 +32,16 @@ public class TokenService {
         return tokenRepository.save(token);
     }
 
-    public boolean extendSession(String token, HttpServletResponse response, int timeInMinutes) {
+    public void extendSession(String token, HttpServletResponse response, int timeInMinutes) {
         Optional<Token> tokenOpt = tokenRepository.findByToken(token);
 
         if (tokenOpt.isEmpty()) {
-            return false;
+            throw new CustomException(HttpStatus.UNAUTHORIZED, "INVALID_SESSION", "Invalid or expired session.");
         }
 
         Token existingToken = tokenOpt.get();
         if (existingToken.getExpiresAt().isBefore(LocalDateTime.now())) {
-            return false;
+            throw new CustomException(HttpStatus.UNAUTHORIZED, "INVALID_SESSION", "Invalid or expired session.");
         }
 
         existingToken.setExpiresAt(existingToken.getExpiresAt().plusMinutes(timeInMinutes));
@@ -51,7 +54,6 @@ public class TokenService {
         cookie.setMaxAge((int) Duration.between(LocalDateTime.now(), existingToken.getExpiresAt()).getSeconds());
 
         response.addCookie(cookie);
-        return true;
     }
 
     public boolean isValidToken(String tokenStr) {
@@ -62,5 +64,11 @@ public class TokenService {
     @Transient
     public void deleteUserTokens(User user) {
         tokenRepository.deleteAllByUser(user);
+    }
+
+    public void requireValidToken(String token) {
+        if (!StringUtils.hasText(token) || !isValidToken(token)) {
+            throw new CustomException(HttpStatus.UNAUTHORIZED, "INVALID_SESSION", "Invalid or expired session.");
+        }
     }
 }

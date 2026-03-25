@@ -1,4 +1,36 @@
 package com.example.documind.dto.responses;
 
+import com.example.documind.entities.files.type.FileCategory;
+import com.example.documind.entities.files.type.FileSemanticType;
+import com.example.documind.entities.files.type.FileSubType;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
+@Getter
+@Setter
+@NoArgsConstructor
 public class FileResponse {
+	private Long id;
+	private String name;
+	private String path;
+	private FileCategory category;
+	private FileSubType subType;
+	private String mimeType;
+	private Long size;
+	private String hash;
+	private List<String> tags;
+	private FileSemanticType semanticType;
+	private Double semanticConfidence;
+	private Map<FileSemanticType, Double> semanticScores;
+	private LocalDateTime uploadDate;
+	private LocalDateTime lastAccess;
+	private LocalDateTime lastModified;
+	private String owner;
+	private boolean compressed;
+	private boolean encrypted;
 }

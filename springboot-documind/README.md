@@ -2,6 +2,27 @@
 
 Questo progetto ora include un primo modulo `files` orientato ai **metadati** (non upload binario).
 
+## Credenziali di test login
+
+Nel profilo `dev` viene fatto il seed automatico di un utente di test (solo se non esiste gia').
+
+- Email: `test@documind.local`
+- Telefono: `+391111111111`
+- Password: `test123`
+
+I valori sono configurabili in `src/main/resources/application-dev.properties` con le chiavi `app.seed.user.*`.
+
+## Profili Spring
+
+- `dev` (default): security aperta per test locale e seed utente attivo.
+- `prod`: regole security piu restrittive e nessun seed automatico.
+
+Avvio `prod`:
+
+```bash
+SPRING_PROFILES_ACTIVE=prod ./mvnw spring-boot:run
+```
+
 ## Flusso architetturale
 
 1. `FileController` riceve HTTP request e cookie `authentication-token`.

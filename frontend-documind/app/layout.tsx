@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DocuMind Login Test",
-  description: "Frontend di prova login per backend Spring Boot",
+  title: "DocuMind",
+  description: "Archivio intelligente per la classificazione documenti",
 };
 
 export default function RootLayout({

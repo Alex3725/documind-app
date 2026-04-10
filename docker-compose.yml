@@ -1,0 +1,91 @@
+services:
+  # ============================================================
+  # DATABASE
+  # ============================================================
+  db:
+    image: mariadb:11
+    container_name: documind_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: documind_app
+      MYSQL_USER: alex
+      MYSQL_PASSWORD: admin123
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # PYTHON AI BACKEND
+  # ============================================================
+  python-backend:
+    build:
+      context: ./backandpy-documind
+      dockerfile: Dockerfile
+    container_name: documind_python
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5:1.5b
+      OLLAMA_TIMEOUT: "300"
+      UPLOAD_DIR: /tmp/uploads
+      FRONTEND_URL: http://localhost:3000
+      PORT: "5001"
+    depends_on:
+      - ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
+  # SPRING BOOT BACKEND
+  # ============================================================
+  spring-backend:
+    build:
+      context: ./springboot-documind
+      dockerfile: Dockerfile
+    container_name: documind_spring
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mariadb://db:3306/documind_app
+      SPRING_DATASOURCE_USERNAME: alex
+      SPRING_DATASOURCE_PASSWORD: admin123
+      SPRING_PROFILES_ACTIVE: dev
+      APP_PYTHON_URL: http://python-backend:5001
+    depends_on:
+      db:
+        condition: service_healthy
+      python-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/user/in"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
+  # OLLAMA (modello AI locale)
+  # ============================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: documind_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    # Prima del deploy, esegui: docker exec documind_ollama ollama pull qwen2.5:1.5b
+
+volumes:
+  db_data:
+  ollama_data:

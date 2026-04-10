@@ -18,9 +18,9 @@ Prima di iniziare, assicurati di avere installato:
 - **Python** (versione 3.8 o successiva).
 - **Pip** (il gestore di pacchetti di Python).
 - **Ollama**: Segui la [guida ufficiale](https://ollama.com/download) per installarlo sul tuo sistema operativo.
-- **Un modello Ollama**: Dopo aver installato Ollama, scarica un modello. Questo esempio usa `llama3`. Esegui questo comando nel tuo terminale:
+- **Un modello Ollama**: Dopo aver installato Ollama, scarica il modello configurato. Questo esempio usa `qwen2.5:1.5b`. Esegui questo comando nel tuo terminale:
   ```bash
-  ollama pull llama3
+  ollama pull qwen2.5:1.5b
   ```
 
 ### 3. Struttura dei File
@@ -53,14 +53,14 @@ Se tutto va bene, vedrai un output simile a questo, che indica che il server è 
 
 1.  **Importazioni e Setup**: Vengono importate le librerie necessarie. `load_dotenv()` carica la configurazione dal file `.env`, e `app = Flask(__name__)` crea l'istanza del server. `CORS(app)` è fondamentale per permettere al frontend (che gira su un'altra porta) di fare richieste a questo server.
 
-2.  **Configurazione Ollama**: Il codice legge `OLLAMA_BASE_URL` e `OLLAMA_MODEL` dal file `.env`. Questo rende facile cambiare modello o indirizzo senza modificare il codice.
+2.  **Configurazione Ollama**: Il codice legge `OLLAMA_BASE_URL` e `OLLAMA_MODEL` dal file `.env`. Se il modello non e` ancora presente, prova a scaricarlo automaticamente prima di inviare la richiesta a Ollama.
 
 3.  **Endpoint `/api/analyze-file`**:
     - `@app.route(...)`: Definisce una rotta API all'indirizzo `/api/analyze-file` che accetta solo richieste `POST`.
     - `request.get_json()`: Estrae il corpo della richiesta, che ci aspettiamo sia un JSON (es. `{"file_path": "..."}`).
     - **Lettura sicura del file**: Per sicurezza, il percorso del file ricevuto viene controllato per evitare che si possa accedere a file fuori dalla directory del progetto (prevenendo attacchi di tipo *Path Traversal*).
     - **Creazione del Prompt**: Questa è la parte più importante. Creiamo un'istruzione testuale per l'LLM. Gli diciamo di agire come un analista e di estrarre dati specifici, **restituendo solo un oggetto JSON**. Questo è un esempio di *Prompt Engineering*. L'opzione `format: "json"` nella richiesta a Ollama aiuta a garantire che l'output sia un JSON valido.
-    - **Chiamata a Ollama**: Usando la libreria `requests`, viene inviata una richiesta `POST` all'endpoint `/api/generate` di Ollama, con il modello, il prompt e il contenuto del file.
+    - **Chiamata a Ollama**: Usando la libreria `requests`, viene inviata una richiesta `POST` all'endpoint `/api/generate` di Ollama, con il modello, il prompt e il contenuto del file. Se il modello non e` disponibile, il backend prova prima a scaricarlo.
     - **Elaborazione della Risposta**: La risposta di Ollama è un JSON che contiene una chiave `"response"`. Il valore di questa chiave è una **stringa** che contiene il JSON che abbiamo chiesto. Il codice estrae questa stringa e la converte in un vero oggetto JSON (`json.loads()`).
     - **Risposta al Frontend**: Infine, l'oggetto JSON estratto viene inviato come risposta al frontend.
 

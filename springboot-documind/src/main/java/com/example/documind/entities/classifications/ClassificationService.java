@@ -1,19 +1,10 @@
 package com.example.documind.entities.classifications;
 
 import com.example.documind.configurations.exceptions.CustomException;
-import com.example.documind.dto.classifications.AnalysisResult;
-import com.example.documind.dto.classifications.ClassificationEntry;
-import com.example.documind.dto.classifications.ConfirmClassificationRequest;
-import com.example.documind.dto.classifications.PythonClassificationResponse;
-import com.example.documind.dto.requests.FileCreateRequest;
-import com.example.documind.dto.responses.FileResponse;
-import com.example.documind.entities.files.FileService;
-import com.example.documind.entities.files.type.FileCategory;
-import com.example.documind.entities.files.type.FileSemanticType;
-import com.example.documind.entities.files.type.FileSubType;
-import com.example.documind.security.tokens.TokenRepository;
-import com.example.documind.security.tokens.TokenService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.documind.dto.classifications.*;
+import com.example.documind.dto.requests.ConfirmClassificationRequest;
+import com.example.documind.dto.responses.PythonTagResponse;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
@@ -24,248 +15,309 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+/**
+ * ClassificationService — logica multi-tag con confidence score.
+ *
+ * REGOLE DI ASSEGNAZIONE:
+ *   confidence >= HIGH_THRESHOLD (0.75) → tag assegnato automaticamente
+ *   confidence in [MID_THRESHOLD, HIGH_THRESHOLD) → DA CONFERMARE (popup)
+ *   confidence < MID_THRESHOLD → non mostrato / ignorato
+ *
+ * Un file può avere MOLTI tag: le confidence sono indipendenti e NON sommano a 100%.
+ */
 @Service
 public class ClassificationService {
 
-    private static final double AUTO_ACCEPT_THRESHOLD = 0.60;
-    private static final double CONFIRMATION_LOWER = 0.50;
-    private static final double CONFIRMATION_UPPER = 0.60;
-    private static final double MIN_SHOW_THRESHOLD = 0.35;
+    // Soglie di decisione
+    private static final double HIGH_THRESHOLD   = 0.75;  // auto-accetta
+    private static final double MID_THRESHOLD    = 0.45;  // chiede conferma
+    private static final double MIN_SHOW_THRESHOLD = 0.20; // mostra nel popup
 
     @Value("${app.python.url:http://localhost:5001}")
     private String pythonBaseUrl;
 
-    private final FileService fileService;
-    private final TokenRepository tokenRepository;
-    private final TokenService tokenService;
-    private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
+    private final RestTemplate restTemplate = new RestTemplate();
 
-    // Cache in-memory delle analisi pendenti (in produzione usare Redis/DB)
-    private final Map<String, PythonClassificationResponse> pendingAnalyses = new ConcurrentHashMap<>();
+    // Cache analisi pendenti (produzione: Redis / DB)
+    private final Map<String, PythonTagResponse> pendingAnalyses = new ConcurrentHashMap<>();
 
-    public ClassificationService(
-            FileService fileService,
-            TokenRepository tokenRepository,
-            TokenService tokenService
-    ) {
-        this.fileService = fileService;
-        this.tokenRepository = tokenRepository;
-        this.tokenService = tokenService;
-        this.restTemplate = new RestTemplate();
-        this.objectMapper = new ObjectMapper();
-    }
+    // =====================================================
+    // ANALIZZA FILE
+    // =====================================================
 
-    /**
-     * Analizza un file:
-     * 1. Invia al backend Python per classificazione AI
-     * 2. Applica logica threshold
-     * 3. Se confidence > 0.6 → auto-accetta e salva
-     * 4. Se 0.5-0.6 → chiede conferma all'utente
-     * 5. Se < 0.5 → folder "Uncategorized"
-     */
-    public AnalysisResult analyzeFile(String authToken, MultipartFile file) throws IOException {
+    public AnalysisResult analyzeFile(String authToken, MultipartFile file, String customTagsJson) throws IOException {
         // 1. Chiama Python AI
-        PythonClassificationResponse pythonResult = callPythonClassify(file);
+        PythonTagResponse pythonResult = callPythonClassify(file, customTagsJson);
 
-        // 2. Filtra classificazioni rilevanti (> MIN_SHOW_THRESHOLD)
-        List<ClassificationEntry> relevant = pythonResult.getClassifications().stream()
-                .filter(c -> c.getConfidence() != null && c.getConfidence() >= MIN_SHOW_THRESHOLD)
-                .sorted(Comparator.comparingDouble(ClassificationEntry::getConfidence).reversed())
+        // 2. Separa tag in categorie
+        List<TagEntry> allTags = pythonResult.getTags() != null
+                ? pythonResult.getTags()
+                : List.of();
+
+        List<TagEntry> autoTags = allTags.stream()
+                .filter(t -> t.getConfidence() != null && t.getConfidence() >= HIGH_THRESHOLD)
                 .collect(Collectors.toList());
 
-        if (relevant.isEmpty()) {
-            return buildLowConfidenceResult(pythonResult, authToken, file);
+        List<TagEntry> confirmTags = allTags.stream()
+                .filter(t -> t.getConfidence() != null
+                        && t.getConfidence() >= MID_THRESHOLD
+                        && t.getConfidence() < HIGH_THRESHOLD)
+                .collect(Collectors.toList());
+
+        List<TagEntry> showTags = allTags.stream()
+                .filter(t -> t.getConfidence() != null && t.getConfidence() >= MIN_SHOW_THRESHOLD)
+                .sorted(Comparator.comparingDouble(TagEntry::getConfidence).reversed())
+                .collect(Collectors.toList());
+
+        // 3. Determina tipo risultato
+        if (!autoTags.isEmpty() && confirmTags.isEmpty()) {
+            // Tutti i tag rilevanti sono sopra soglia alta → CLASSIFIED
+            return buildAutoClassifiedResult(pythonResult, autoTags, showTags, authToken, file);
         }
 
-        ClassificationEntry top = relevant.get(0);
-        double topConfidence = top.getConfidence();
-
-        // 3. Auto-accept se confidence > 60%
-        if (topConfidence > AUTO_ACCEPT_THRESHOLD) {
-            return buildAutoClassifiedResult(pythonResult, relevant, authToken, file);
-        }
-
-        // 4. Chiedi conferma se 50-60%
-        if (topConfidence >= CONFIRMATION_LOWER) {
+        if (!autoTags.isEmpty() && !confirmTags.isEmpty()) {
+            // Mix: alcuni auto, altri da confermare → PARTIAL_CONFIRMATION
             pendingAnalyses.put(pythonResult.getFileId(), pythonResult);
-            return buildConfirmationRequiredResult(pythonResult, relevant);
+            return buildPartialConfirmationResult(pythonResult, autoTags, confirmTags, showTags);
         }
 
-        // 5. Low confidence
-        return buildLowConfidenceResult(pythonResult, authToken, file);
+        if (!confirmTags.isEmpty()) {
+            // Solo tag incerti → CONFIRMATION_REQUIRED
+            pendingAnalyses.put(pythonResult.getFileId(), pythonResult);
+            return buildConfirmationRequiredResult(pythonResult, confirmTags, showTags);
+        }
+
+        // Nessun tag significativo → LOW_CONFIDENCE
+        return buildLowConfidenceResult(pythonResult);
     }
 
-    /**
-     * Conferma la classificazione scelta dall'utente per file incerti.
-     */
+    // =====================================================
+    // CONFERMA CLASSIFICAZIONE UTENTE
+    // =====================================================
+
     public AnalysisResult confirmClassification(String authToken, ConfirmClassificationRequest request) throws IOException {
-        PythonClassificationResponse cached = pendingAnalyses.remove(request.getFileId());
+        PythonTagResponse cached = pendingAnalyses.remove(request.getFileId());
         if (cached == null) {
             throw new CustomException(
                 HttpStatus.NOT_FOUND,
                 "PENDING_NOT_FOUND",
-                "Analisi pendente non trovata. Potrebbe essere scaduta."
+                "Analisi pendente non trovata. Potrebbe essere scaduta o già confermata."
             );
         }
 
-        // Trova la classificazione confermata
-        List<ClassificationEntry> relevant = cached.getClassifications().stream()
-                .filter(c -> c.getConfidence() != null && c.getConfidence() >= MIN_SHOW_THRESHOLD)
-                .sorted(Comparator.comparingDouble(ClassificationEntry::getConfidence).reversed())
+        // Valida tag confermati dall'utente
+        List<String> confirmedTagNames = request.getConfirmedTags();
+        if (confirmedTagNames == null || confirmedTagNames.isEmpty()) {
+            throw new CustomException(
+                HttpStatus.BAD_REQUEST,
+                "TAG_INVALID",
+                "Devi selezionare almeno un tag per confermare la classificazione."
+            );
+        }
+
+        // Ricostruisce tag entry dai nomi confermati
+        List<TagEntry> confirmedTags = confirmedTagNames.stream()
+                .map(name -> {
+                    TagEntry original = cached.getTags().stream()
+                            .filter(t -> t.getName().equals(name))
+                            .findFirst()
+                            .orElse(null);
+                    if (original != null) return original;
+                    // Tag custom non presente nella risposta AI
+                    TagEntry custom = new TagEntry();
+                    custom.setName(name);
+                    custom.setConfidence(1.0); // confermato manualmente = max confidence
+                    custom.setCategory("custom");
+                    return custom;
+                })
                 .collect(Collectors.toList());
 
-        // Costruisci result con il tipo confermato dall'utente
-        List<String> tags = buildTagsFromType(request.getConfirmedType(), 1.0);
+        // Aggiunge tag addizionali se presenti
         if (request.getAdditionalTags() != null) {
             request.getAdditionalTags().stream()
-                    .map(t -> t.trim().toLowerCase())
-                    .filter(t -> !t.isEmpty())
-                    .forEach(tags::add);
+                    .map(name -> {
+                        TagEntry t = new TagEntry();
+                        t.setName(name.trim().toLowerCase());
+                        t.setConfidence(1.0);
+                        t.setCategory("custom");
+                        return t;
+                    })
+                    .forEach(confirmedTags::add);
         }
+
+        // De-duplica
+        List<TagEntry> finalTags = confirmedTags.stream()
+                .collect(Collectors.toMap(TagEntry::getName, t -> t, (a, b) -> a))
+                .values().stream()
+                .collect(Collectors.toList());
+
+        List<String> tagNames = finalTags.stream()
+                .map(TagEntry::getName)
+                .collect(Collectors.toList());
 
         AnalysisResult result = new AnalysisResult();
         result.setType("CLASSIFIED");
         result.setFileId(cached.getFileId());
         result.setFilename(cached.getFilename());
-        result.setClassifications(relevant);
-        result.setAssignedTags(tags);
+        result.setTags(finalTags);
+        result.setAssignedTags(tagNames);
+        result.setAllTags(cached.getTags());
         result.setExtractedData(cached.getExtractedData());
-        result.setSuggestedFolder(mapTypeToFolder(request.getConfirmedType()));
-        result.setMessage("Classificazione confermata: " + request.getConfirmedType());
-
+        result.setSuggestedFolder(mapTagsToFolder(tagNames));
+        result.setMessage("Classificazione confermata con " + tagNames.size() + " tag.");
         return result;
     }
 
     // =====================================================
-    // HELPER: costruzione risultati
+    // BUILDER RISULTATI
     // =====================================================
 
     private AnalysisResult buildAutoClassifiedResult(
-            PythonClassificationResponse pythonResult,
-            List<ClassificationEntry> relevant,
+            PythonTagResponse pythonResult,
+            List<TagEntry> autoTags,
+            List<TagEntry> allShowTags,
             String authToken,
             MultipartFile file
     ) throws IOException {
-        ClassificationEntry top = relevant.get(0);
-        List<String> tags = buildTagsFromClassifications(relevant);
+        List<String> tagNames = autoTags.stream()
+                .map(TagEntry::getName)
+                .collect(Collectors.toList());
 
         AnalysisResult result = new AnalysisResult();
         result.setType("CLASSIFIED");
         result.setFileId(pythonResult.getFileId());
         result.setFilename(pythonResult.getFilename());
-        result.setClassifications(relevant);
-        result.setAssignedTags(tags);
+        result.setTags(autoTags);
+        result.setAssignedTags(tagNames);
+        result.setAllTags(allShowTags);
         result.setExtractedData(pythonResult.getExtractedData());
-        result.setSuggestedFolder(mapTypeToFolder(top.getType()));
-        result.setMessage("File classificato automaticamente come: " + top.getType()
-                + " (" + String.format("%.0f%%", top.getConfidence() * 100) + " confidenza)");
+        result.setSuggestedFolder(mapTagsToFolder(tagNames));
+        result.setSummary(pythonResult.getSummary());
+
+        String topTag = autoTags.get(0).getName();
+        int pct = (int)(autoTags.get(0).getConfidence() * 100);
+        result.setMessage(String.format(
+            "File classificato automaticamente. Tag principale: %s (%d%%). Tag totali: %d.",
+            topTag, pct, tagNames.size()
+        ));
+        return result;
+    }
+
+    private AnalysisResult buildPartialConfirmationResult(
+            PythonTagResponse pythonResult,
+            List<TagEntry> autoTags,
+            List<TagEntry> confirmTags,
+            List<TagEntry> allShowTags
+    ) {
+        List<String> autoTagNames = autoTags.stream()
+                .map(TagEntry::getName)
+                .collect(Collectors.toList());
+
+        AnalysisResult result = new AnalysisResult();
+        result.setType("PARTIAL_CONFIRMATION");
+        result.setFileId(pythonResult.getFileId());
+        result.setFilename(pythonResult.getFilename());
+        result.setTags(autoTags);
+        result.setAssignedTags(autoTagNames);
+        result.setPendingTags(confirmTags);
+        result.setAllTags(allShowTags);
+        result.setExtractedData(pythonResult.getExtractedData());
+        result.setSummary(pythonResult.getSummary());
+        result.setMessage(String.format(
+            "Trovati %d tag certi e %d da confermare. Confermi i tag incerti?",
+            autoTags.size(), confirmTags.size()
+        ));
         return result;
     }
 
     private AnalysisResult buildConfirmationRequiredResult(
-            PythonClassificationResponse pythonResult,
-            List<ClassificationEntry> relevant
+            PythonTagResponse pythonResult,
+            List<TagEntry> confirmTags,
+            List<TagEntry> allShowTags
     ) {
-        // Top 3 opzioni per il popup
-        List<ClassificationEntry> topOptions = relevant.stream()
-                .limit(3)
-                .collect(Collectors.toList());
-
         AnalysisResult result = new AnalysisResult();
         result.setType("CONFIRMATION_REQUIRED");
         result.setFileId(pythonResult.getFileId());
         result.setFilename(pythonResult.getFilename());
-        result.setClassifications(relevant);
-        result.setOptions(topOptions);
+        result.setTags(List.of());
+        result.setAssignedTags(List.of());
+        result.setPendingTags(confirmTags);
+        result.setAllTags(allShowTags);
         result.setExtractedData(pythonResult.getExtractedData());
-        result.setMessage("Non siamo sicuri della classificazione. Puoi confermare il tipo corretto?");
+        result.setSummary(pythonResult.getSummary());
+        result.setMessage("Non siamo sicuri della classificazione. Seleziona i tag corretti.");
         return result;
     }
 
-    private AnalysisResult buildLowConfidenceResult(
-            PythonClassificationResponse pythonResult,
-            String authToken,
-            MultipartFile file
-    ) {
+    private AnalysisResult buildLowConfidenceResult(PythonTagResponse pythonResult) {
+        List<TagEntry> lowTags = pythonResult.getTags() != null
+                ? pythonResult.getTags().stream()
+                        .filter(t -> t.getConfidence() != null && t.getConfidence() > 0.05)
+                        .sorted(Comparator.comparingDouble(TagEntry::getConfidence).reversed())
+                        .limit(5)
+                        .collect(Collectors.toList())
+                : List.of();
+
         AnalysisResult result = new AnalysisResult();
         result.setType("LOW_CONFIDENCE");
         result.setFileId(pythonResult.getFileId());
         result.setFilename(pythonResult.getFilename());
-        result.setClassifications(pythonResult.getClassifications().stream()
-                .filter(c -> c.getConfidence() != null && c.getConfidence() >= 0.1)
-                .sorted(Comparator.comparingDouble(ClassificationEntry::getConfidence).reversed())
-                .limit(5)
-                .collect(Collectors.toList()));
-        result.setAssignedTags(List.of("uncategorized"));
+        result.setTags(List.of());
+        result.setAssignedTags(List.of("non-classificato"));
+        result.setAllTags(lowTags);
         result.setExtractedData(pythonResult.getExtractedData());
-        result.setSuggestedFolder("Uncategorized");
-        result.setMessage("Confidenza troppo bassa. File spostato in 'Senza categoria'.");
+        result.setSummary(pythonResult.getSummary());
+        result.setSuggestedFolder("Non classificati");
+        result.setMessage("Confidenza troppo bassa per classificare automaticamente. File spostato in 'Non classificati'.");
         return result;
     }
 
     // =====================================================
-    // HELPER: tag e cartelle
+    // MAPPING TAG → CARTELLA
     // =====================================================
 
-    private List<String> buildTagsFromClassifications(List<ClassificationEntry> classifications) {
-        List<String> tags = new ArrayList<>();
-        for (ClassificationEntry c : classifications) {
-            if (c.getConfidence() != null && c.getConfidence() > AUTO_ACCEPT_THRESHOLD) {
-                tags.addAll(buildTagsFromType(c.getType(), c.getConfidence()));
-            }
+    private String mapTagsToFolder(List<String> tags) {
+        if (tags == null || tags.isEmpty()) return "Non classificati";
+
+        // Mappa tag → cartella con priorità
+        Map<String, String> tagToFolder = Map.ofEntries(
+            Map.entry("fattura", "Finanza"),
+            Map.entry("ricevuta", "Finanza"),
+            Map.entry("busta_paga", "Finanza"),
+            Map.entry("documento_finanziario", "Finanza"),
+            Map.entry("contratto", "Legale"),
+            Map.entry("documento_legale", "Legale"),
+            Map.entry("documento_identita", "Personale"),
+            Map.entry("curriculum", "HR"),
+            Map.entry("documento_medico", "Salute"),
+            Map.entry("ricetta_medica", "Salute"),
+            Map.entry("codice_sorgente", "Tech"),
+            Map.entry("documento_tecnico", "Tech"),
+            Map.entry("email", "Comunicazioni"),
+            Map.entry("verbale", "Business"),
+            Map.entry("relazione", "Business"),
+            Map.entry("presentazione", "Business"),
+            Map.entry("poesia", "Letteratura"),
+            Map.entry("narrativa", "Letteratura"),
+            Map.entry("foglio_calcolo", "Dati")
+        );
+
+        for (String tag : tags) {
+            String folder = tagToFolder.get(tag);
+            if (folder != null) return folder;
         }
-        // Deduplication
-        return tags.stream().distinct().collect(Collectors.toList());
-    }
-
-    private List<String> buildTagsFromType(String type, double confidence) {
-        List<String> tags = new ArrayList<>();
-        if (type == null) return tags;
-
-        String slug = type.toLowerCase().replace(" ", "-");
-        tags.add(slug);
-
-        // Tag aggiuntivi per categoria
-        switch (type) {
-            case "Invoice", "Receipt" -> tags.add("finance");
-            case "Contract", "Legal Document" -> tags.add("legal");
-            case "Resume" -> tags.add("hr");
-            case "Personal Document" -> tags.add("personal");
-            case "Medical Document" -> tags.add("health");
-            case "Financial Document" -> { tags.add("finance"); tags.add("accounting"); }
-            case "Technical Document", "Code" -> tags.add("tech");
-        }
-
-        return tags;
-    }
-
-    private String mapTypeToFolder(String type) {
-        if (type == null) return "Uncategorized";
-        return switch (type) {
-            case "Invoice", "Receipt", "Financial Document" -> "Finance";
-            case "Contract", "Legal Document" -> "Legal";
-            case "Resume" -> "HR";
-            case "Personal Document" -> "Personal";
-            case "Medical Document" -> "Health";
-            case "Code", "Technical Document" -> "Tech";
-            case "Email" -> "Email";
-            case "Report", "Presentation" -> "Reports";
-            case "Poetry", "Literature" -> "Literature";
-            default -> "Other";
-        };
+        return "Altro";
     }
 
     // =====================================================
     // CHIAMATA PYTHON BACKEND
     // =====================================================
 
-    private PythonClassificationResponse callPythonClassify(MultipartFile file) throws IOException {
+    private PythonTagResponse callPythonClassify(MultipartFile file, String customTagsJson) throws IOException {
         String url = pythonBaseUrl + "/api/classify";
 
         HttpHeaders headers = new HttpHeaders();
@@ -279,14 +331,17 @@ public class ClassificationService {
             }
         };
         body.add("file", resource);
+        if (customTagsJson != null) {
+            body.add("custom_tags", customTagsJson);
+        }
 
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
         try {
-            ResponseEntity<PythonClassificationResponse> response = restTemplate.postForEntity(
+            ResponseEntity<PythonTagResponse> response = restTemplate.postForEntity(
                     url,
                     requestEntity,
-                    PythonClassificationResponse.class
+                    PythonTagResponse.class
             );
 
             if (response.getBody() == null) {
@@ -303,67 +358,9 @@ public class ClassificationService {
         } catch (Exception e) {
             throw new CustomException(
                 HttpStatus.SERVICE_UNAVAILABLE,
-                "PYTHON_UNAVAILABLE",
+                "ANALYSIS_FAILED",
                 "Servizio AI non disponibile: " + e.getMessage()
             );
         }
-    }
-
-    // =====================================================
-    // UTILITY: calcola hash SHA-256
-    // =====================================================
-
-    private String computeHash(byte[] bytes) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(bytes);
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return UUID.randomUUID().toString().replace("-", "");
-        }
-    }
-
-    // =====================================================
-    // MAPPING tipi AI → FileSemanticType Spring
-    // =====================================================
-
-    private FileSemanticType mapToSemanticType(String type) {
-        if (type == null) return FileSemanticType.UNKNOWN;
-        return switch (type) {
-            case "Invoice" -> FileSemanticType.INVOICE;
-            case "Receipt" -> FileSemanticType.RECEIPT;
-            case "Contract" -> FileSemanticType.CONTRACT;
-            case "Resume" -> FileSemanticType.CV;
-            case "Legal Document" -> FileSemanticType.LEGAL_DOCUMENT;
-            case "Financial Document" -> FileSemanticType.FINANCIAL_DOCUMENT;
-            case "Report" -> FileSemanticType.REPORT;
-            case "Email" -> FileSemanticType.EMAIL;
-            case "Presentation" -> FileSemanticType.PRESENTATION;
-            default -> FileSemanticType.OTHER;
-        };
-    }
-
-    private FileCategory mapToCategory(String type) {
-        if (type == null) return FileCategory.OTHER;
-        return switch (type) {
-            case "Code" -> FileCategory.CODE;
-            case "Spreadsheet" -> FileCategory.DATA;
-            default -> FileCategory.DOCUMENT;
-        };
-    }
-
-    private FileSubType mapToSubType(String mimeType) {
-        if (mimeType == null) return FileSubType.UNKNOWN;
-        return switch (mimeType) {
-            case "application/pdf" -> FileSubType.PDF;
-            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> FileSubType.WORD;
-            case "text/plain", "text/markdown" -> FileSubType.TEXT;
-            case "text/csv" -> FileSubType.DATA_CSV;
-            default -> FileSubType.UNKNOWN;
-        };
     }
 }

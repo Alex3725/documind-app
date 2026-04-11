@@ -15,16 +15,26 @@ type SortType = "newest" | "oldest" | "name";
 
 const FOLDER_COLORS: Record<string, string> = {
   Finance: "#16a34a",
+  Finanza: "#16a34a",
   Legal: "#7c3aed",
+  Legale: "#7c3aed",
   HR: "#0284c7",
   Personal: "#db2777",
+  Personale: "#db2777",
   Health: "#dc2626",
+  Salute: "#dc2626",
   Tech: "#0891b2",
+  Comunicazioni: "#d97706",
+  Business: "#64748b",
+  Dati: "#0891b2",
+  Letteratura: "#a16207",
   Email: "#d97706",
   Reports: "#64748b",
   Literature: "#a16207",
   Other: "#6b7280",
+  Altro: "#6b7280",
   Uncategorized: "#9ca3af",
+  "Non classificati": "#9ca3af",
 };
 
 export default function DashboardPage() {
@@ -62,12 +72,12 @@ export default function DashboardPage() {
     setShowOnboarding(false);
   };
 
-  const handleConfirmClassification = async (type: string, tags: string[]) => {
+  const handleConfirmClassification = async (confirmedTags: string[], tags: string[]) => {
     if (!pendingAnalysis) return;
     await dispatch(
       confirmClassification({
         fileId: pendingAnalysis.file_id,
-        confirmedType: type,
+        confirmedTags,
         additionalTags: tags,
       })
     );
@@ -79,7 +89,11 @@ export default function DashboardPage() {
     .filter((f) => {
       if (activeFolder && f.folder !== activeFolder) return false;
       if (filter === "classified" && f.analysisResult.type !== "CLASSIFIED") return false;
-      if (filter === "confirmation_required" && f.analysisResult.type !== "CONFIRMATION_REQUIRED") return false;
+      if (
+        filter === "confirmation_required" &&
+        f.analysisResult.type !== "CONFIRMATION_REQUIRED" &&
+        f.analysisResult.type !== "PARTIAL_CONFIRMATION"
+      ) return false;
       if (filter === "low_confidence" && f.analysisResult.type !== "LOW_CONFIDENCE") return false;
       if (search) {
         const q = search.toLowerCase();
@@ -98,7 +112,11 @@ export default function DashboardPage() {
     });
 
   const statsClassified = files.filter((f) => f.analysisResult.type === "CLASSIFIED").length;
-  const statsPending = files.filter((f) => f.analysisResult.type === "CONFIRMATION_REQUIRED").length;
+  const statsPending = files.filter(
+    (f) =>
+      f.analysisResult.type === "CONFIRMATION_REQUIRED" ||
+      f.analysisResult.type === "PARTIAL_CONFIRMATION"
+  ).length;
   const statsLow = files.filter((f) => f.analysisResult.type === "LOW_CONFIDENCE").length;
 
   return (

@@ -1,9 +1,11 @@
-package com.example.documind.dto.classifications;
+package com.example.documind.dto.requests;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
+import java.util.List;
 
 @Getter
 @Setter
@@ -13,14 +15,13 @@ public class ConfirmClassificationRequest {
     @JsonProperty("file_id")
     private String fileId;
 
-    /**
-     * Il tipo confermato dall'utente
-     */
-    @JsonProperty("confirmed_type")
-    private String confirmedType;
+    /** Tag confermati dall'utente */
+    @JsonProperty("confirmed_tags")
+    private List<String> confirmedTags;
 
     /**
      * Tag custom aggiuntivi (opzionale)
      */
-    private java.util.List<String> additionalTags;
+    @JsonProperty("additional_tags")
+    private List<String> additionalTags;
 }

@@ -4,21 +4,30 @@ import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/tool
 // TYPES
 // ============================================================
 
-export type ClassificationEntry = {
-  type: string;
+export type TagEntry = {
+  name: string;
   confidence: number;
+  description?: string;
+  category?: string;
+  isDefault?: boolean;
 };
 
 export type AnalysisResult = {
-  type: "CLASSIFIED" | "CONFIRMATION_REQUIRED" | "LOW_CONFIDENCE";
+  type: "CLASSIFIED" | "PARTIAL_CONFIRMATION" | "CONFIRMATION_REQUIRED" | "LOW_CONFIDENCE";
   file_id: string;
   filename: string;
-  classifications: ClassificationEntry[];
-  assignedTags?: string[];
-  options?: ClassificationEntry[];
+  /** Tag assegnati automaticamente (confidence >= 0.75) */
+  tags: TagEntry[];
+  /** Nomi dei tag assegnati */
+  assigned_tags: string[];
+  /** Tag in attesa di conferma (0.45–0.75) */
+  pending_tags?: TagEntry[];
+  /** Tutti i tag con score > 0.20 (per popup) */
+  all_tags?: TagEntry[];
+  summary?: string;
   message: string;
   extracted_data?: Record<string, unknown>;
-  suggestedFolder?: string;
+  suggested_folder?: string;
   saved_file_id?: number;
 };
 
@@ -27,7 +36,14 @@ export type FileItem = {
   filename: string;
   uploadedAt: string;
   analysisResult: AnalysisResult;
-  confirmedType?: string;
+  confirmedTags?: string[];
+  tags: string[];
+  folder: string;
+};
+
+// Upload senza analisi
+export type ManualUploadPayload = {
+  filename: string;
   tags: string[];
   folder: string;
 };
@@ -37,7 +53,7 @@ type FileState = {
   pendingAnalysis: AnalysisResult | null;
   status: "idle" | "loading" | "succeeded" | "failed";
   error: string | null;
-  uploadProgress: number;
+  errorCode: string | null;
 };
 
 const initialState: FileState = {
@@ -45,33 +61,29 @@ const initialState: FileState = {
   pendingAnalysis: null,
   status: "idle",
   error: null,
-  uploadProgress: 0,
+  errorCode: null,
+};
+
+// ============================================================
+// ERROR PARSING
+// ============================================================
+
+type ApiError = {
+  message?: string;
+  error?: string;
+  code?: string;
+  details?: unknown;
 };
 
 function extractErrorMessage(payload: unknown, fallback: string): string {
-  if (!payload || typeof payload !== "object") {
-    return fallback;
-  }
+  if (!payload || typeof payload !== "object") return fallback;
+  const obj = payload as ApiError;
+  return obj.message?.trim() || obj.error?.trim() || fallback;
+}
 
-  const obj = payload as Record<string, unknown>;
-
-  if (typeof obj.message === "string" && obj.message.trim()) {
-    return obj.message;
-  }
-
-  if (typeof obj.error === "string" && obj.error.trim()) {
-    return obj.error;
-  }
-
-  if (typeof obj.details === "string" && obj.details.trim()) {
-    return obj.details;
-  }
-
-  if (typeof obj.code === "string" && obj.code.trim()) {
-    return `${fallback} (${obj.code})`;
-  }
-
-  return fallback;
+function extractErrorCode(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  return (payload as ApiError).code ?? null;
 }
 
 // ============================================================
@@ -80,11 +92,14 @@ function extractErrorMessage(payload: unknown, fallback: string): string {
 
 export const uploadAndAnalyze = createAsyncThunk<
   AnalysisResult,
-  File,
-  { rejectValue: string }
->("files/uploadAndAnalyze", async (file, thunkApi) => {
+  { file: File; customTags?: Array<{ name: string; description: string; category?: string }> },
+  { rejectValue: { message: string; code: string | null } }
+>("files/uploadAndAnalyze", async ({ file, customTags }, thunkApi) => {
   const formData = new FormData();
   formData.append("file", file);
+  if (customTags && customTags.length > 0) {
+    formData.append("custom_tags_for_analysis", JSON.stringify(customTags));
+  }
 
   const response = await fetch("/api/classify/analyze", {
     method: "POST",
@@ -97,16 +112,17 @@ export const uploadAndAnalyze = createAsyncThunk<
   try {
     data = JSON.parse(text);
   } catch {
-    if (!response.ok && text.trim()) {
-      return thunkApi.rejectWithValue(text.trim());
-    }
-    return thunkApi.rejectWithValue("Risposta non valida dal server.");
+    return thunkApi.rejectWithValue({
+      message: text.trim() || "Risposta non valida dal server.",
+      code: "PARSE_ERROR",
+    });
   }
 
   if (!response.ok) {
-    return thunkApi.rejectWithValue(
-      extractErrorMessage(data, "Errore durante l'analisi.")
-    );
+    return thunkApi.rejectWithValue({
+      message: extractErrorMessage(data, "Errore durante l'analisi del file."),
+      code: extractErrorCode(data),
+    });
   }
 
   return data as AnalysisResult;
@@ -114,8 +130,8 @@ export const uploadAndAnalyze = createAsyncThunk<
 
 export const confirmClassification = createAsyncThunk<
   AnalysisResult,
-  { fileId: string; confirmedType: string; additionalTags?: string[] },
-  { rejectValue: string }
+  { fileId: string; confirmedTags: string[]; additionalTags?: string[] },
+  { rejectValue: { message: string; code: string | null } }
 >("files/confirmClassification", async (payload, thunkApi) => {
   const response = await fetch("/api/classify/confirm", {
     method: "POST",
@@ -123,18 +139,18 @@ export const confirmClassification = createAsyncThunk<
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       file_id: payload.fileId,
-      confirmed_type: payload.confirmedType,
-      additionalTags: payload.additionalTags ?? [],
+      confirmed_tags: payload.confirmedTags,
+      additional_tags: payload.additionalTags ?? [],
     }),
   });
 
-  const data = await response.json() as unknown;
+  const data = (await response.json()) as unknown;
   if (!response.ok) {
-    return thunkApi.rejectWithValue(
-      extractErrorMessage(data, "Errore durante la conferma.")
-    );
+    return thunkApi.rejectWithValue({
+      message: extractErrorMessage(data, "Errore durante la conferma."),
+      code: extractErrorCode(data),
+    });
   }
-
   return data as AnalysisResult;
 });
 
@@ -149,94 +165,109 @@ const fileSlice = createSlice({
     clearPendingAnalysis(state) {
       state.pendingAnalysis = null;
     },
-    addFileFromResult(state, action: PayloadAction<{ result: AnalysisResult; filename: string }>) {
-      const { result, filename } = action.payload;
+    addManualFile(state, action: PayloadAction<ManualUploadPayload>) {
+      const { filename, tags, folder } = action.payload;
       const fileItem: FileItem = {
-        id: result.file_id,
+        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         filename,
         uploadedAt: new Date().toISOString(),
-        analysisResult: result,
-        tags: result.assignedTags ?? [],
-        folder: result.suggestedFolder ?? "Other",
+        analysisResult: {
+          type: "CLASSIFIED",
+          file_id: "",
+          filename,
+          tags: tags.map((name) => ({ name, confidence: 1.0, category: "manual" })),
+          assigned_tags: tags,
+          message: "File salvato manualmente.",
+          suggested_folder: folder,
+        },
+        tags,
+        folder,
       };
       state.files.unshift(fileItem);
-    },
-    updateFileConfirmation(
-      state,
-      action: PayloadAction<{ fileId: string; confirmedType: string; result: AnalysisResult }>
-    ) {
-      const { fileId, confirmedType, result } = action.payload;
-      const idx = state.files.findIndex((f) => f.id === fileId);
-      if (idx !== -1) {
-        state.files[idx].confirmedType = confirmedType;
-        state.files[idx].tags = result.assignedTags ?? [];
-        state.files[idx].folder = result.suggestedFolder ?? "Other";
-        state.files[idx].analysisResult = result;
-      }
     },
     removeFile(state, action: PayloadAction<string>) {
       state.files = state.files.filter((f) => f.id !== action.payload);
     },
+    updateFileTags(
+      state,
+      action: PayloadAction<{ fileId: string; tags: string[]; folder?: string }>
+    ) {
+      const { fileId, tags, folder } = action.payload;
+      const file = state.files.find((f) => f.id === fileId);
+      if (file) {
+        file.tags = tags;
+        if (folder) file.folder = folder;
+      }
+    },
     clearError(state) {
       state.error = null;
+      state.errorCode = null;
     },
   },
   extraReducers: (builder) => {
     builder
+      // UPLOAD + ANALYZE
       .addCase(uploadAndAnalyze.pending, (state) => {
         state.status = "loading";
         state.error = null;
+        state.errorCode = null;
         state.pendingAnalysis = null;
       })
       .addCase(uploadAndAnalyze.fulfilled, (state, action) => {
         state.status = "succeeded";
         const result = action.payload;
 
-        if (result.type === "CONFIRMATION_REQUIRED") {
+        if (
+          result.type === "CONFIRMATION_REQUIRED" ||
+          result.type === "PARTIAL_CONFIRMATION"
+        ) {
           state.pendingAnalysis = result;
         } else {
-          // Auto-add to files list
           const fileItem: FileItem = {
-            id: result.file_id,
+            id: result.file_id || `${Date.now()}`,
             filename: result.filename,
             uploadedAt: new Date().toISOString(),
             analysisResult: result,
-            tags: result.assignedTags ?? [],
-            folder: result.suggestedFolder ?? "Other",
+            tags: result.assigned_tags ?? [],
+            folder: result.suggested_folder ?? "Altro",
           };
           state.files.unshift(fileItem);
         }
       })
       .addCase(uploadAndAnalyze.rejected, (state, action) => {
         state.status = "failed";
-        state.error = action.payload ?? "Errore sconosciuto.";
+        state.error = action.payload?.message ?? "Errore sconosciuto.";
+        state.errorCode = action.payload?.code ?? null;
       })
+
+      // CONFIRM
       .addCase(confirmClassification.fulfilled, (state, action) => {
         const result = action.payload;
         state.pendingAnalysis = null;
 
         const fileItem: FileItem = {
-          id: result.file_id,
+          id: result.file_id || `${Date.now()}`,
           filename: result.filename,
           uploadedAt: new Date().toISOString(),
           analysisResult: result,
-          confirmedType: result.message?.split(": ")[1],
-          tags: result.assignedTags ?? [],
-          folder: result.suggestedFolder ?? "Other",
+          confirmedTags: result.assigned_tags,
+          tags: result.assigned_tags ?? [],
+          folder: result.suggested_folder ?? "Altro",
         };
         state.files.unshift(fileItem);
       })
       .addCase(confirmClassification.rejected, (state, action) => {
-        state.error = action.payload ?? "Errore durante la conferma.";
+        state.error = action.payload?.message ?? "Errore durante la conferma.";
+        state.errorCode = action.payload?.code ?? null;
       });
   },
 });
 
 export const {
   clearPendingAnalysis,
-  addFileFromResult,
-  updateFileConfirmation,
+  addManualFile,
   removeFile,
+  updateFileTags,
   clearError,
 } = fileSlice.actions;
 

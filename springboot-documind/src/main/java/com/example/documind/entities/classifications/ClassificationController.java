@@ -1,7 +1,8 @@
 package com.example.documind.entities.classifications;
 
 import com.example.documind.dto.classifications.AnalysisResult;
-import com.example.documind.dto.classifications.ConfirmClassificationRequest;
+import com.example.documind.dto.requests.ConfirmClassificationRequest;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -28,9 +29,10 @@ public class ClassificationController {
     @PostMapping("/analyze")
     public ResponseEntity<AnalysisResult> analyzeFile(
             @CookieValue(name = "authentication-token", required = false) String token,
-            @RequestParam("file") MultipartFile file
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(name = "custom_tags_for_analysis", required = false) String customTagsForAnalysis
     ) throws IOException {
-        AnalysisResult result = classificationService.analyzeFile(token, file);
+        AnalysisResult result = classificationService.analyzeFile(token, file, customTagsForAnalysis);
         return ResponseEntity.ok(result);
     }
 

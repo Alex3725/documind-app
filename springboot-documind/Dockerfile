@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk-slim AS build
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 
 COPY mvnw .
@@ -9,8 +9,12 @@ RUN chmod +x mvnw && ./mvnw dependency:go-offline -q
 COPY src src
 RUN ./mvnw clean package -DskipTests -q
 
-FROM eclipse-temurin:21-jre-slim
+FROM eclipse-temurin:21-jre
 WORKDIR /app
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends curl \
+	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080

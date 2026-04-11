@@ -12,7 +12,7 @@ services:
       MYSQL_USER: alex
       MYSQL_PASSWORD: admin123
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
@@ -34,7 +34,7 @@ services:
       - "5001:5001"
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: qwen2.5:1.5b
+      OLLAMA_MODEL: tinyllama:1.1b
       OLLAMA_TIMEOUT: "300"
       UPLOAD_DIR: /tmp/uploads
       FRONTEND_URL: http://localhost:3000
@@ -70,7 +70,7 @@ services:
       python-backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/user/in"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
       interval: 20s
       timeout: 10s
       retries: 5

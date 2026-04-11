@@ -159,3 +159,17 @@ cd springboot-documind
 - Il modello `qwen2.5:1.5b` richiede circa ~1-2GB RAM
 - Le analisi pendenti (50-60% confidence) sono in memoria: riavviare Spring Boot le azzera
 - In produzione, usare Redis per la cache delle analisi pendenti
+
+
+## Implementazione
+
+- persistenza file upload
+- aggiorna file
+- analisi con percentuale
+- utente immagine upload anti expload 
+- Persistenza tag custom nel DB (serve endpoint `/api/v1/tags` in Spring Boot)
+- Upload file senza analisi con scelta cartella/tag nel frontend
+- Sezione tag management collegata al backend
+- Test unitari per il nuovo `ClassificationService`
+
+

@@ -29,25 +29,137 @@ OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", 300))
 
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".md", ".csv", ".html"}
 
-# Categorie di classificazione supportate
-CLASSIFICATION_TYPES = [
-    "Invoice",
-    "Receipt",
-    "Contract",
-    "Resume",
-    "Personal Document",
-    "Legal Document",
-    "Poetry",
-    "Literature",
-    "Code",
-    "Spreadsheet",
-    "Presentation",
-    "Report",
-    "Email",
-    "Financial Document",
-    "Medical Document",
-    "Technical Document",
-    "Other"
+TAG_NAME_ALIASES = {
+    "contraetto": "contratto",
+    "contratti": "contratto",
+    "cv": "curriculum",
+    "documento identita": "documento_identita",
+    "documento di identita": "documento_identita",
+    "id document": "documento_identita",
+    "source code": "codice_sorgente",
+    "code": "codice_sorgente",
+    "spreadsheet": "foglio_calcolo",
+    "payslip": "busta_paga",
+    "medical report": "documento_medico",
+    "medical prescription": "ricetta_medica",
+}
+
+KEYWORD_FALLBACK_RULES = {
+    "fattura": ["fattura", "invoice", "partita iva", "imponibile", "totale", "iva"],
+    "ricevuta": ["ricevuta", "scontrino", "pagamento ricevuto", "importo pagato"],
+    "contratto": ["contratto", "accordo", "clausola", "firmato", "parti"],
+    "curriculum": ["curriculum", "cv", "esperienza", "competenze", "formazione"],
+    "documento_identita": ["carta d'identita", "passaporto", "patente", "codice fiscale"],
+    "documento_legale": ["tribunale", "sentenza", "ordinanza", "atto notarile"],
+    "poesia": ["poesia", "verso", "strofa", "rima"],
+    "narrativa": ["romanzo", "racconto", "capitolo", "personaggio"],
+    "codice_sorgente": ["class ", "function", "import ", "public static", "def "],
+    "foglio_calcolo": ["csv", "colonna", "riga", "foglio", "tabella"],
+    "presentazione": ["slide", "presentazione", "agenda", "speaker notes"],
+    "relazione": ["relazione", "report", "analisi", "conclusioni"],
+    "email": ["oggetto:", "mittente:", "destinatario:", "inviato:"],
+    "documento_medico": ["referto", "diagnosi", "paziente", "esame"],
+    "documento_tecnico": ["specifiche", "architettura", "api", "manuale"],
+    "verbale": ["verbale", "riunione", "ordine del giorno", "presenti"],
+    "busta_paga": ["busta paga", "retribuzione", "cedolino", "stipendio"],
+    "ricetta_medica": ["ricetta", "prescrizione", "farmaco", "dosaggio"],
+}
+
+# =====================================================
+# TAG DI DEFAULT DEL SISTEMA
+# =====================================================
+
+DEFAULT_TAGS = [
+    {
+        "name": "fattura",
+        "description": "Documento che attesta un'operazione commerciale con importo dovuto, numero fattura, partita IVA e dati del fornitore/cliente",
+        "category": "finance"
+    },
+    {
+        "name": "ricevuta",
+        "description": "Documento che certifica la ricezione di un pagamento o merce, più semplice di una fattura",
+        "category": "finance"
+    },
+    {
+        "name": "contratto",
+        "description": "Accordo legale tra due o più parti che stabilisce obblighi, diritti e condizioni",
+        "category": "legal"
+    },
+    {
+        "name": "curriculum",
+        "description": "Documento personale che riassume l'esperienza lavorativa, la formazione e le competenze di una persona",
+        "category": "hr"
+    },
+    {
+        "name": "documento_identita",
+        "description": "Documento ufficiale che certifica l'identità di una persona (carta d'identità, passaporto, patente)",
+        "category": "personal"
+    },
+    {
+        "name": "documento_legale",
+        "description": "Atto notarile, sentenza, ordinanza o qualsiasi documento con valenza giuridica",
+        "category": "legal"
+    },
+    {
+        "name": "poesia",
+        "description": "Componimento letterario in versi, con struttura ritmica o metrica",
+        "category": "literature"
+    },
+    {
+        "name": "narrativa",
+        "description": "Opera letteraria in prosa: romanzo, racconto, novella",
+        "category": "literature"
+    },
+    {
+        "name": "codice_sorgente",
+        "description": "File contenente istruzioni di programmazione in qualsiasi linguaggio (Python, Java, JS, ecc.)",
+        "category": "tech"
+    },
+    {
+        "name": "foglio_calcolo",
+        "description": "Documento con dati tabellari, formule, grafici (Excel, CSV, ecc.)",
+        "category": "data"
+    },
+    {
+        "name": "presentazione",
+        "description": "Documento con slide per presentazioni (PowerPoint, Keynote, ecc.)",
+        "category": "business"
+    },
+    {
+        "name": "relazione",
+        "description": "Documento descrittivo che analizza un argomento, un progetto o un'attività",
+        "category": "business"
+    },
+    {
+        "name": "email",
+        "description": "Messaggio di posta elettronica, con mittente, destinatario e oggetto",
+        "category": "communication"
+    },
+    {
+        "name": "documento_medico",
+        "description": "Referto, prescrizione, cartella clinica, certificato medico",
+        "category": "health"
+    },
+    {
+        "name": "documento_tecnico",
+        "description": "Manuale tecnico, specifiche di progetto, documentazione di sistema",
+        "category": "tech"
+    },
+    {
+        "name": "verbale",
+        "description": "Resoconto scritto di una riunione, assemblea o seduta",
+        "category": "business"
+    },
+    {
+        "name": "busta_paga",
+        "description": "Documento che attesta la retribuzione mensile di un lavoratore dipendente",
+        "category": "finance"
+    },
+    {
+        "name": "ricetta_medica",
+        "description": "Prescrizione medica per farmaci o esami diagnostici",
+        "category": "health"
+    },
 ]
 
 # =====================================================
@@ -112,7 +224,11 @@ def guess_mime(ext: str) -> str:
     return mime_map.get(ext, "application/octet-stream")
 
 
-def _ollama_model_names(tags_payload: dict) -> set[str]:
+# =====================================================
+# GESTIONE MODELLO OLLAMA
+# =====================================================
+
+def _ollama_model_names(tags_payload: dict) -> set:
     model_names = set()
     for entry in tags_payload.get("models", []):
         model_name = entry.get("model") or entry.get("name")
@@ -136,19 +252,16 @@ def is_ollama_model_available() -> bool:
 def ensure_ollama_model_available() -> None:
     if is_ollama_model_available():
         return
-
     pull_response = requests.post(
         f"{OLLAMA_BASE_URL}/api/pull",
         json={"name": OLLAMA_MODEL, "stream": False},
         timeout=OLLAMA_TIMEOUT,
     )
     pull_response.raise_for_status()
-
     try:
         pull_payload = pull_response.json()
     except ValueError as exc:
         raise requests.RequestException("Risposta non valida durante il pull del modello Ollama.") from exc
-
     if pull_payload.get("error"):
         raise requests.RequestException(pull_payload["error"])
 
@@ -157,73 +270,142 @@ def format_ollama_error(error: requests.RequestException) -> str:
     response = getattr(error, "response", None)
     if response is None:
         return str(error)
-
     try:
         payload = response.json()
     except ValueError:
         payload = {}
-
     return payload.get("error") or payload.get("message") or response.text or str(error)
 
 
 # =====================================================
-# CLASSIFICAZIONE AI CON OLLAMA
+# CORE AI: ANALISI CON TAG MULTI-LABEL + CONFIDENCE
 # =====================================================
 
-def call_ollama_classify(text: str, filename: str) -> dict:
+def build_tags_context(custom_tags: list = None) -> str:
+    """Costruisce il contesto dei tag per il prompt AI."""
+    all_tags = DEFAULT_TAGS.copy()
+    if custom_tags:
+        all_tags.extend(custom_tags)
+    
+    tags_desc = []
+    for tag in all_tags:
+        desc = f'- "{tag["name"]}": {tag["description"]}'
+        if tag.get("category"):
+            desc += f' [categoria: {tag["category"]}]'
+        tags_desc.append(desc)
+    
+    return "\n".join(tags_desc)
+
+
+def normalize_tag_name(tag_name: str) -> str:
+    if not tag_name:
+        return ""
+    normalized = tag_name.strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = TAG_NAME_ALIASES.get(normalized, normalized)
+    return TAG_NAME_ALIASES.get(normalized.replace("_", " "), normalized)
+
+
+def extract_tag_scores_from_raw(raw: dict | list, known_tags: set) -> dict:
+    scores = {}
+
+    def push_score(name: str, confidence: float):
+        normalized = normalize_tag_name(name)
+        if normalized not in known_tags:
+            return
+        bounded = max(0.0, min(1.0, float(confidence or 0.0)))
+        scores[normalized] = max(scores.get(normalized, 0.0), bounded)
+
+    if isinstance(raw, dict):
+        raw_scores = raw.get("tag_scores")
+        if isinstance(raw_scores, dict):
+            for name, conf in raw_scores.items():
+                push_score(name, conf)
+
+        raw_tags = raw.get("tags")
+        if isinstance(raw_tags, list):
+            for item in raw_tags:
+                if isinstance(item, dict):
+                    push_score(item.get("name", ""), item.get("confidence", 0.0))
+                elif isinstance(item, str):
+                    push_score(item, 0.65)
+
+        primary = raw.get("primary_tags")
+        if isinstance(primary, list):
+            for item in primary:
+                if isinstance(item, str):
+                    push_score(item, 0.7)
+
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            tags = item.get("tags")
+            conf = item.get("confidence", 0.0)
+            if isinstance(tags, list):
+                for t in tags:
+                    if isinstance(t, str):
+                        push_score(t, conf)
+
+    return scores
+
+
+def keyword_fallback_scores(text: str, known_tags: set) -> dict:
+    lower_text = text.lower()
+    fallback = {}
+    for tag_name, keywords in KEYWORD_FALLBACK_RULES.items():
+        if tag_name not in known_tags:
+            continue
+        hits = sum(1 for keyword in keywords if keyword in lower_text)
+        if hits <= 0:
+            continue
+        # 1 keyword -> 0.56, 2 -> 0.67, 3+ -> 0.78
+        fallback[tag_name] = min(0.78, 0.45 + (hits * 0.11))
+    return fallback
+
+
+def call_ollama_tag_analysis(text: str, filename: str, custom_tags: list = None) -> dict:
     """
-    Chiama Ollama per classificazione multi-label con confidence scores.
-    Restituisce lista di {type, confidence} ordinata per confidenza decrescente.
+    Analisi AI che restituisce TAG MULTIPLI con confidence score.
+    Ogni file può avere più tag, le percentuali NON sommano a 100%.
     """
     ensure_ollama_model_available()
-    types_list = ", ".join(CLASSIFICATION_TYPES)
+    
+    tags_context = build_tags_context(custom_tags)
+    tag_names = [t["name"] for t in DEFAULT_TAGS]
+    if custom_tags:
+        tag_names.extend([t["name"] for t in custom_tags])
+    
+    tags_json_template = "{" + ", ".join([f'"{name}": 0.0' for name in tag_names]) + "}"
 
-    prompt = f"""You are a document classification expert. Analyze the following document and classify it.
+    prompt = f"""Sei un esperto classificatore di documenti. Analizza questo documento e assegna un punteggio di confidenza (0.0 a 1.0) a OGNI tag elencato.
 
-Document filename: {filename}
+IMPORTANTE:
+- Ogni tag è INDIPENDENTE: le percentuali NON devono sommare a 100%
+- Un documento PUÒ avere più tag con alta confidenza contemporaneamente
+- Assegna punteggi alti (>0.7) SOLO quando sei molto sicuro
+- Un documento può essere sia "fattura" (0.95) che "documento_legale" (0.60) allo stesso tempo
 
-Document content:
+FILE: {filename}
+
+TAG DISPONIBILI (con descrizione):
+{tags_context}
+
+DOCUMENTO:
 ```
-{text}
+{text[:6000]}
 ```
 
-Your task:
-1. Assign a confidence score (0.0 to 1.0) to EACH of these document types: {types_list}
-2. A document can belong to multiple types (multi-label classification)
-3. Be precise: only give high scores (>0.5) when truly confident
-4. Scores must reflect real content analysis, not guesses
-
-Also extract:
-- "tipo_documento": primary document type in Italian (fattura, contratto, lettera, ricevuta, curriculum, documento_personale, altro)
-- "data_documento": date if present (ISO format or null)
-- "soggetti_coinvolti": list of people/companies mentioned (or empty list)
-- "descrizione_breve": 1-2 sentence summary in Italian
-
-Respond ONLY with valid JSON in this exact format:
+Rispondi SOLO con JSON valido in questo formato esatto:
 {{
-  "classifications": [
-    {{"type": "Invoice", "confidence": 0.0}},
-    {{"type": "Receipt", "confidence": 0.0}},
-    {{"type": "Contract", "confidence": 0.0}},
-    {{"type": "Resume", "confidence": 0.0}},
-    {{"type": "Personal Document", "confidence": 0.0}},
-    {{"type": "Legal Document", "confidence": 0.0}},
-    {{"type": "Poetry", "confidence": 0.0}},
-    {{"type": "Literature", "confidence": 0.0}},
-    {{"type": "Code", "confidence": 0.0}},
-    {{"type": "Spreadsheet", "confidence": 0.0}},
-    {{"type": "Presentation", "confidence": 0.0}},
-    {{"type": "Report", "confidence": 0.0}},
-    {{"type": "Email", "confidence": 0.0}},
-    {{"type": "Financial Document", "confidence": 0.0}},
-    {{"type": "Medical Document", "confidence": 0.0}},
-    {{"type": "Technical Document", "confidence": 0.0}},
-    {{"type": "Other", "confidence": 0.0}}
-  ],
-  "tipo_documento": "string or null",
-  "data_documento": "string or null",
-  "soggetti_coinvolti": [],
-  "descrizione_breve": "string"
+  "tag_scores": {tags_json_template},
+  "primary_tags": ["tag1", "tag2"],
+  "summary": "breve descrizione del documento in italiano (max 100 parole)",
+  "extracted_data": {{
+    "data_documento": null,
+    "soggetti_coinvolti": [],
+    "importo_totale": null,
+    "note": ""
+  }}
 }}"""
 
     payload = {
@@ -246,65 +428,46 @@ Respond ONLY with valid JSON in this exact format:
     data = response.json()
     raw = json.loads(data.get("response", "{}"))
 
-    # Normalizza e ordina per confidenza
-    classifications = raw.get("classifications", [])
-    for c in classifications:
-        c["confidence"] = max(0.0, min(1.0, float(c.get("confidence", 0.0))))
-    classifications.sort(key=lambda x: x["confidence"], reverse=True)
+    known_tags = set(tag_names)
+    tag_scores = extract_tag_scores_from_raw(raw, known_tags)
+    if not tag_scores:
+        tag_scores = keyword_fallback_scores(text, known_tags)
+
+    # Costruisce lista tag con confidence > 0.05 (filtra rumore)
+    tags_with_confidence = []
+    
+    for tag_name, confidence in tag_scores.items():
+        confidence = max(0.0, min(1.0, float(confidence or 0.0)))
+        if confidence > 0.05:
+            # Trova info tag
+            tag_info = next((t for t in DEFAULT_TAGS if t["name"] == tag_name), None)
+            if not tag_info and custom_tags:
+                tag_info = next((t for t in custom_tags if t["name"] == tag_name), None)
+            
+            tags_with_confidence.append({
+                "name": tag_name,
+                "confidence": round(confidence, 4),
+                "description": tag_info["description"] if tag_info else "",
+                "category": tag_info.get("category", "other") if tag_info else "other",
+                "is_default": tag_info in DEFAULT_TAGS if tag_info else True
+            })
+    
+    # Ordina per confidenza decrescente
+    tags_with_confidence.sort(key=lambda x: x["confidence"], reverse=True)
+    
+    summary = raw.get("summary", "") if isinstance(raw, dict) else ""
+    if not summary and tags_with_confidence:
+        top = tags_with_confidence[0]
+        summary = f"Documento classificato principalmente come '{top['name']}'."
+
+    extracted_data = raw.get("extracted_data", {}) if isinstance(raw, dict) else {}
 
     return {
-        "classifications": classifications,
-        "tipo_documento": raw.get("tipo_documento"),
-        "data_documento": raw.get("data_documento"),
-        "soggetti_coinvolti": raw.get("soggetti_coinvolti", []),
-        "descrizione_breve": raw.get("descrizione_breve", "")
+        "tags": tags_with_confidence,
+        "primary_tags": [t["name"] for t in tags_with_confidence[:3]],
+        "summary": summary,
+        "extracted_data": extracted_data
     }
-
-
-def call_ollama_extract(text: str) -> dict:
-    """Estrae metadati strutturati dal documento (compatibilità con vecchio endpoint)."""
-    ensure_ollama_model_available()
-    prompt = f"""
-Analizza il seguente documento.
-Estrai SOLO se presenti le seguenti informazioni:
-- tipo_documento (fattura, contratto, lettera, ricevuta, altro)
-- data_documento
-- data_scadenza
-- soggetti_coinvolti (persone o aziende)
-- descrizione_breve
-
-IMPORTI:
-Se presenti, restituisci un JSON con:
-"importi": {{
-    "totale": numero o null,
-    "imponibile": numero o null,
-    "iva": numero o null,
-    "altri": [{{"descrizione": stringa,"valore": numero,"valuta": stringa}}]
-}}
-- Usa SOLO numeri
-- Se un campo non è presente usa null
-- NON inventare valori
-
-Rispondi ESCLUSIVAMENTE con JSON valido.
-Documento:
-```
-{text}
-```
-"""
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "format": "json",
-        "stream": False
-    }
-    response = requests.post(
-        f"{OLLAMA_BASE_URL}/api/generate",
-        json=payload,
-        timeout=OLLAMA_TIMEOUT
-    )
-    response.raise_for_status()
-    data = response.json()
-    return json.loads(data.get("response", "{}"))
 
 
 # =====================================================
@@ -330,7 +493,13 @@ def analyze_file():
         if not text:
             return jsonify({"error": "Testo vuoto o non estraibile"}), 400
 
-        result = call_ollama_extract(text)
+        # Usa il nuovo sistema di tag
+        result = call_ollama_tag_analysis(text, file.filename)
+        
+        # Compatibilità con vecchio formato
+        extracted = result.get("extracted_data", {})
+        extracted["tipo_documento"] = result["primary_tags"][0] if result["primary_tags"] else "altro"
+        extracted["descrizione_breve"] = result.get("summary", "")
 
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 400
@@ -344,34 +513,49 @@ def analyze_file():
 
     return jsonify({
         "filename": file.filename,
-        "extracted_data": result
+        "extracted_data": extracted
     })
 
 
 @app.route("/api/classify", methods=["POST"])
 def classify_file():
     """
-    Endpoint principale: classifica il documento con multi-label e confidence scores.
-    Usato da Spring Boot.
+    Endpoint principale: classifica il documento con tag MULTI-LABEL e confidence scores.
+    
+    Input: multipart/form-data con:
+        - file: il documento da analizzare
+        - custom_tags (opzionale): JSON array di tag custom dell'utente
     
     Response format:
     {
         "file_id": "uuid",
         "filename": "example.pdf",
-        "classifications": [
-            {"type": "Invoice", "confidence": 0.85},
+        "tags": [
+            {"name": "fattura", "confidence": 0.92, "description": "...", "category": "finance"},
+            {"name": "documento_legale", "confidence": 0.45, "description": "...", "category": "legal"},
             ...
         ],
-        "extracted_text": "...",
-        "metadata": {...},
-        "extracted_data": {...}
+        "primary_tags": ["fattura"],
+        "summary": "Descrizione del documento...",
+        "extracted_data": {...},
+        "metadata": {...}
     }
     """
     file = request.files.get("file")
     if not file:
-        return jsonify({"error": "File mancante"}), 400
+        return jsonify({"error": "File mancante", "code": "FILE_MISSING"}), 400
 
     filename = file.filename or "unknown"
+    
+    # Tag custom opzionali dell'utente
+    custom_tags_raw = request.form.get("custom_tags")
+    custom_tags = []
+    if custom_tags_raw:
+        try:
+            custom_tags = json.loads(custom_tags_raw)
+        except Exception:
+            pass
+
     tmp_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}_{filename}")
 
     try:
@@ -380,17 +564,23 @@ def classify_file():
         text = normalize_text(raw_text)
 
         if not text:
-            return jsonify({"error": "Testo vuoto o non estraibile"}), 400
+            return jsonify({
+                "error": "Testo vuoto o non estraibile dal file",
+                "code": "EMPTY_TEXT"
+            }), 400
 
         metadata = extract_metadata(tmp_path, filename)
-        ai_result = call_ollama_classify(text, filename)
+        ai_result = call_ollama_tag_analysis(text, filename, custom_tags)
 
     except ValueError as ve:
-        return jsonify({"error": str(ve)}), 400
+        return jsonify({"error": str(ve), "code": "FILE_NOT_SUPPORTED"}), 400
     except requests.RequestException as re:
-        return jsonify({"error": f"Errore Ollama: {format_ollama_error(re)}"}), 503
+        return jsonify({
+            "error": f"Servizio AI non disponibile: {format_ollama_error(re)}",
+            "code": "ANALYSIS_FAILED"
+        }), 503
     except Exception as e:
-        return jsonify({"error": f"Errore interno: {str(e)}"}), 500
+        return jsonify({"error": f"Errore interno: {str(e)}", "code": "INTERNAL_ERROR"}), 500
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -400,15 +590,21 @@ def classify_file():
     return jsonify({
         "file_id": file_id,
         "filename": filename,
-        "classifications": ai_result["classifications"],
-        "extracted_text": text[:2000],  # primi 2000 chars per debug
+        "tags": ai_result["tags"],
+        "primary_tags": ai_result["primary_tags"],
+        "summary": ai_result["summary"],
+        "extracted_text": text[:2000],
         "metadata": metadata,
-        "extracted_data": {
-            "tipo_documento": ai_result.get("tipo_documento"),
-            "data_documento": ai_result.get("data_documento"),
-            "soggetti_coinvolti": ai_result.get("soggetti_coinvolti", []),
-            "descrizione_breve": ai_result.get("descrizione_breve", "")
-        }
+        "extracted_data": ai_result["extracted_data"]
+    })
+
+
+@app.route("/api/tags/default", methods=["GET"])
+def get_default_tags():
+    """Restituisce i tag di default del sistema."""
+    return jsonify({
+        "tags": DEFAULT_TAGS,
+        "count": len(DEFAULT_TAGS)
     })
 
 
@@ -430,7 +626,8 @@ def health_check():
         "ollama_connected": ollama_ok,
         "ollama_model_available": model_ok,
         "model": OLLAMA_MODEL,
-        "classification_types": CLASSIFICATION_TYPES
+        "default_tags_count": len(DEFAULT_TAGS),
+        "supported_extensions": list(ALLOWED_EXTENSIONS)
     })
 
 
@@ -443,4 +640,5 @@ if __name__ == "__main__":
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
     print(f"DocuMind Python AI Backend avviato su porta {port}")
     print(f"Ollama: {OLLAMA_BASE_URL} | Modello: {OLLAMA_MODEL}")
+    print(f"Tag di default disponibili: {len(DEFAULT_TAGS)}")
     app.run(host="0.0.0.0", port=port, debug=debug)

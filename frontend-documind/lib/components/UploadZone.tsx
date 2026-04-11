@@ -67,7 +67,7 @@ export default function UploadZone() {
   const handleAnalyze = async () => {
     if (!selectedFile || isLoading) return;
     dispatch(clearError());
-    await dispatch(uploadAndAnalyze(selectedFile));
+    await dispatch(uploadAndAnalyze({ file: selectedFile }));
     setSelectedFile(null);
   };
 

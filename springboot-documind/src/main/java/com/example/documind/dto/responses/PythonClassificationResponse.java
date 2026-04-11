@@ -1,5 +1,6 @@
-package com.example.documind.dto.classifications;
+package com.example.documind.dto.responses;
 
+import com.example.documind.dto.classifications.ClassificationEntry;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

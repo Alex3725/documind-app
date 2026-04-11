@@ -16,9 +16,10 @@ import java.util.Map;
 public class AnalysisResult {
 
     /**
-     * CLASSIFIED       → classificazione automatica accettata (confidence > 0.6)
-     * CONFIRMATION_REQUIRED → confidenza 0.5-0.6, l'utente deve confermare
-     * LOW_CONFIDENCE   → confidenza < 0.5, file in "Uncategorized"
+     * CLASSIFIED            → classificazione automatica completata
+     * PARTIAL_CONFIRMATION  → alcuni tag certi, altri da confermare
+     * CONFIRMATION_REQUIRED → tutti i tag sono incerti, utente deve scegliere
+     * LOW_CONFIDENCE        → nessun tag significativo
      */
     private String type;
 
@@ -27,20 +28,22 @@ public class AnalysisResult {
 
     private String filename;
 
-    /**
-     * Classificazioni top (solo quelle con confidence > 0.4)
-     */
-    private List<ClassificationEntry> classifications;
+    /** Tag assegnati automaticamente (confidence >= 0.75) */
+    private List<TagEntry> tags;
 
-    /**
-     * Tag assegnati automaticamente (confidence > 0.6)
-     */
+    /** Nomi dei tag assegnati */
+    @JsonProperty("assigned_tags")
     private List<String> assignedTags;
 
-    /**
-     * Opzioni da mostrare all'utente nel popup di conferma
-     */
-    private List<ClassificationEntry> options;
+    /** Tag in attesa di conferma (confidence 0.45-0.75) */
+    @JsonProperty("pending_tags")
+    private List<TagEntry> pendingTags;
+
+    /** Tutti i tag con score > 0.20 (per mostrare nel popup) */
+    @JsonProperty("all_tags")
+    private List<TagEntry> allTags;
+
+    private String summary;
 
     /**
      * Messaggio da mostrare all'utente
@@ -53,9 +56,8 @@ public class AnalysisResult {
     @JsonProperty("extracted_data")
     private Map<String, Object> extractedData;
 
-    /**
-     * Cartella suggerita
-     */
+    /** Cartella suggerita */
+    @JsonProperty("suggested_folder")
     private String suggestedFolder;
 
     /**

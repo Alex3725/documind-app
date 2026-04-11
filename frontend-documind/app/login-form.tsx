@@ -1,21 +1,12 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import styled, { css } from "styled-components";
 import { clearAuthError, loginUser } from "@/lib/features/authSlice";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 
 type IdentifierType = "email" | "telephone";
-
-type BackendStatus = {
-  online: boolean;
-  connected: boolean;
-  backendUrl: string;
-  statusCode: number | null;
-  responseTimeMs: number;
-  message: string;
-};
 
 export default function LoginForm() {
   const dispatch = useAppDispatch();
@@ -25,17 +16,9 @@ export default function LoginForm() {
   const [identifierType, setIdentifierType] = useState<IdentifierType>("email");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [isCheckingBackend, setIsCheckingBackend] = useState(false);
-  const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
 
   const isLoading = status === "loading";
   const canSubmit = identifier.trim().length > 0 && password.trim().length > 0 && !isLoading;
-
-  const submitLabel = useMemo(() => {
-    if (isLoading) return "Accesso in corso...";
-    if (user) return "Rifai login";
-    return "Accedi";
-  }, [isLoading, user]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -52,24 +35,6 @@ export default function LoginForm() {
     }
   };
 
-  const handleCheckBackend = async () => {
-    setIsCheckingBackend(true);
-    try {
-      const response = await fetch("/api/backend/status", { method: "GET", cache: "no-store" });
-      const data = (await response.json()) as BackendStatus;
-      setBackendStatus(data);
-    } catch {
-      setBackendStatus({
-        online: false, connected: false,
-        backendUrl: "http://localhost:8080",
-        statusCode: null, responseTimeMs: 0,
-        message: "Errore durante la verifica del backend.",
-      });
-    } finally {
-      setIsCheckingBackend(false);
-    }
-  };
-
   return (
     <Page>
       <Glow />
@@ -77,26 +42,8 @@ export default function LoginForm() {
         <Eyebrow>DocuMind</Eyebrow>
         <Title>Accedi al tuo archivio</Title>
         <Description>
-          Sistema di classificazione intelligente documenti con AI locale.
+          Classificazione intelligente documenti con AI locale.
         </Description>
-
-        <HealthRow>
-          <HealthButton type="button" onClick={handleCheckBackend} disabled={isCheckingBackend}>
-            {isCheckingBackend ? "Verifica..." : "Verifica backend"}
-          </HealthButton>
-          <HealthState $online={backendStatus?.online ?? false}>
-            {backendStatus ? (backendStatus.online ? "Online ✓" : "Offline ✗") : "Non verificato"}
-          </HealthState>
-        </HealthRow>
-
-        {backendStatus && (
-          <HealthInfo $online={backendStatus.online}>
-            <p>{backendStatus.message}</p>
-            <small>
-              URL: {backendStatus.backendUrl} · HTTP {backendStatus.statusCode ?? "—"} · {backendStatus.responseTimeMs}ms
-            </small>
-          </HealthInfo>
-        )}
 
         <ToggleRow>
           <ToggleButton type="button" $active={identifierType === "email"} onClick={() => setIdentifierType("email")}>
@@ -112,7 +59,7 @@ export default function LoginForm() {
             {identifierType === "email" ? "Email" : "Numero di telefono"}
           </Label>
           <Input
-            id="identifier" name="identifier"
+            id="identifier"
             type={identifierType === "email" ? "email" : "text"}
             autoComplete={identifierType === "email" ? "email" : "tel"}
             placeholder={identifierType === "email" ? "nome@dominio.it" : "+39 333 1234567"}
@@ -123,8 +70,9 @@ export default function LoginForm() {
 
           <Label htmlFor="password">Password</Label>
           <Input
-            id="password" name="password"
-            type="password" autoComplete="current-password"
+            id="password"
+            type="password"
+            autoComplete="current-password"
             placeholder="Inserisci password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -132,7 +80,7 @@ export default function LoginForm() {
           />
 
           <SubmitButton type="submit" disabled={!canSubmit}>
-            {submitLabel}
+            {isLoading ? "Accesso in corso..." : "Accedi"}
           </SubmitButton>
         </Form>
 
@@ -141,11 +89,18 @@ export default function LoginForm() {
         {user && (
           <SuccessBox>
             <p>✅ Login riuscito! Reindirizzamento...</p>
-            <GoBtn onClick={() => router.push("/dashboard")}>
-              Vai alla Dashboard →
-            </GoBtn>
+            <GoBtn onClick={() => router.push("/dashboard")}>Vai alla Dashboard →</GoBtn>
           </SuccessBox>
         )}
+
+        <Divider />
+
+        <SignupRow>
+          Non hai un account?{" "}
+          <SignupLink onClick={() => router.push("/signup")}>
+            Registrati gratuitamente →
+          </SignupLink>
+        </SignupRow>
 
         <DemoNote>
           <strong>Demo:</strong> email <code>test@documind.local</code> · password <code>test123</code>
@@ -155,7 +110,7 @@ export default function LoginForm() {
   );
 }
 
-// ===== STYLES (identici all'originale + nuovi) =====
+// ===== STYLES =====
 
 const Page = styled.main`
   min-height: 100vh;
@@ -176,7 +131,7 @@ const Glow = styled.div`
 `;
 
 const Card = styled.section`
-  width: min(100%, 480px);
+  width: min(100%, 460px);
   background: rgba(255,255,255,0.92);
   border: 1px solid rgba(13,53,43,0.1);
   border-radius: 20px;
@@ -196,68 +151,22 @@ const Eyebrow = styled.p`
 `;
 
 const Title = styled.h1`
-  margin: 12px 0 10px;
-  font-size: clamp(1.5rem, 5vw, 1.9rem);
-  line-height: 1.2;
+  margin: 12px 0 8px;
+  font-size: 1.8rem;
   color: #113f36;
 `;
 
 const Description = styled.p`
-  margin: 0;
+  margin: 0 0 20px;
   color: #2a5a50;
-  line-height: 1.55;
-  font-size: 0.92rem;
-`;
-
-const HealthRow = styled.div`
-  margin-top: 16px;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-`;
-
-const HealthButton = styled.button`
-  border: 1px solid #b5cec5;
-  background: #fff;
-  color: #1d5a4d;
-  border-radius: 10px;
-  font-weight: 700;
-  padding: 8px 12px;
-  font-size: 0.82rem;
-  cursor: pointer;
-
-  &:disabled { opacity: 0.65; cursor: not-allowed; }
-`;
-
-const HealthState = styled.span<{ $online: boolean }>`
-  font-size: 0.8rem;
-  font-weight: 800;
-  border-radius: 999px;
-  padding: 4px 10px;
-  border: 1px solid ${({ $online }) => ($online ? "#8ac4a8" : "#efb7bc")};
-  color: ${({ $online }) => ($online ? "#0e5b3b" : "#9d1b25")};
-  background: ${({ $online }) => ($online ? "#e8f9f0" : "#ffecee")};
-`;
-
-const HealthInfo = styled.div<{ $online: boolean }>`
-  margin-top: 8px;
-  border-radius: 10px;
-  padding: 9px 12px;
-  border: 1px solid ${({ $online }) => ($online ? "#b8ddcc" : "#f0c2c6")};
-  background: ${({ $online }) => ($online ? "#f0faf5" : "#fff2f4")};
-  color: ${({ $online }) => ($online ? "#1f5d4f" : "#98222a")};
-  font-size: 0.82rem;
-
-  p { margin: 0 0 3px; font-weight: 600; }
-  small { opacity: 0.85; }
+  font-size: 0.9rem;
 `;
 
 const ToggleRow = styled.div`
-  margin-top: 18px;
-  margin-bottom: 6px;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-bottom: 8px;
 `;
 
 const ToggleButton = styled.button<{ $active: boolean }>`
@@ -282,7 +191,6 @@ const ToggleButton = styled.button<{ $active: boolean }>`
 `;
 
 const Form = styled.form`
-  margin-top: 8px;
   display: grid;
   gap: 10px;
 `;
@@ -306,7 +214,7 @@ const Input = styled.input`
 `;
 
 const SubmitButton = styled.button`
-  margin-top: 8px;
+  margin-top: 6px;
   border: none;
   border-radius: 12px;
   padding: 12px 14px;
@@ -325,7 +233,7 @@ const SubmitButton = styled.button`
 `;
 
 const ErrorBox = styled.p`
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   background: #ffe9ea;
   border: 1px solid #f3bdc1;
   color: #a31a24;
@@ -336,7 +244,7 @@ const ErrorBox = styled.p`
 `;
 
 const SuccessBox = styled.div`
-  margin-top: 14px;
+  margin-top: 12px;
   background: #f0faf5;
   border: 1px solid #bde0d4;
   border-radius: 12px;
@@ -355,12 +263,30 @@ const GoBtn = styled.button`
   font-weight: 700;
   cursor: pointer;
   font-size: 0.9rem;
+`;
 
-  &:hover { background: #155c4b; }
+const Divider = styled.hr`
+  border: none;
+  border-top: 1px solid #e8e8e8;
+  margin: 20px 0;
+`;
+
+const SignupRow = styled.p`
+  text-align: center;
+  font-size: 0.88rem;
+  color: #555;
+  margin: 0 0 14px;
+`;
+
+const SignupLink = styled.button`
+  background: none; border: none;
+  color: #1b6f5c; font-weight: 700;
+  cursor: pointer; font-size: 0.88rem;
+
+  &:hover { text-decoration: underline; }
 `;
 
 const DemoNote = styled.div`
-  margin-top: 16px;
   padding: 10px 14px;
   background: #fffbf0;
   border: 1px solid #f5d87a;

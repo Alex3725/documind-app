@@ -4,7 +4,7 @@ Sistema full-stack per la classificazione automatica di documenti tramite AI loc
 
 ---
 
-## 🗂️ Struttura del progetto
+## Struttura del progetto
 
 ```
 documind/
@@ -16,7 +16,7 @@ documind/
 
 ---
 
-## 🚀 Avvio rapido
+## Avvio rapido
 
 ### Prerequisiti
 - Java 21+
@@ -89,7 +89,7 @@ pnpm dev
 
 ---
 
-## 🔄 Flusso di classificazione
+## Flusso di classificazione
 
 ```
 [Upload file] → Next.js → Spring Boot → Python AI (Ollama)
@@ -104,7 +104,7 @@ pnpm dev
 
 ---
 
-## 🐳 Deploy con Docker
+## Deploy con Docker
 
 ```bash
 docker-compose up -d
@@ -115,7 +115,7 @@ docker exec documind_ollama ollama pull qwen2.5:1.5b
 
 ---
 
-## 🧪 Test
+## Test
 
 ### Python
 ```bash
@@ -131,7 +131,7 @@ cd springboot-documind
 
 ---
 
-## 📋 Categorie di classificazione
+## Categorie di classificazione
 
 | Tipo | Descrizione |
 |------|-------------|
@@ -153,7 +153,7 @@ cd springboot-documind
 
 ---
 
-## ⚠️ Note importanti
+## Note importanti
 
 - L'AI gira **localmente** tramite Ollama: nessun dato inviato a server esterni
 - Il modello `qwen2.5:1.5b` richiede circa ~1-2GB RAM

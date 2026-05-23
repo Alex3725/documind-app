@@ -1,175 +1,379 @@
-# DocuMind — Sistema Intelligente di Classificazione Documenti
+# 🧠 DocuMind App
 
-Sistema full-stack per la classificazione automatica di documenti tramite AI locale (Ollama).
+DocuMind è una piattaforma full-stack per **archiviazione e classificazione intelligente dei documenti** con AI locale (Ollama), composta da tre servizi principali:
 
----
+- **Frontend**: Next.js 16 + React 19 (`frontend-documind`)
+- **Backend API**: Spring Boot 4 + MariaDB (`springboot-documind`)
+- **AI Engine**: Flask + Ollama (`backandpy-documind`)
 
-## 🗂️ Struttura del progetto
-
-```
-documind/
-├── backandpy-documind/      # Python AI Backend (Flask + Ollama)
-├── springboot-documind/     # Spring Boot Backend (API + DB)
-├── frontend-documind/       # Next.js Frontend
-└── docker-compose.yml       # Deploy completo
-```
+L’obiettivo è gestire il ciclo completo: autenticazione utente, caricamento documento, analisi semantica multi-tag, conferma umana dei casi incerti e consultazione archivio.
 
 ---
 
-## 🚀 Avvio rapido
+## 📌 Executive Summary
 
-### Prerequisiti
+Il repository implementa una pipeline ibrida:
+
+1. l’utente carica un file dal frontend;
+2. Spring Boot inoltra il file al servizio Python;
+3. Python estrae testo, chiama Ollama e produce tag con confidence score;
+4. Spring Boot applica soglie decisionali:
+   - `>= 0.75`: classificazione automatica;
+   - `0.45 - 0.74`: conferma utente richiesta;
+   - `< 0.45`: bassa confidenza.
+5. il frontend mostra risultato, popup di conferma (se necessario) e organizzazione in cartelle suggerite.
+
+---
+
+## 🏗️ Architettura del sistema
+
+### Componenti
+
+### 1) Frontend (`frontend-documind`)
+- Interfaccia utente (login, signup, dashboard, tag management)
+- Stato locale con Redux Toolkit
+- API Routes Next.js come BFF/proxy verso Spring Boot
+- UI con `styled-components`
+
+### 2) Spring Boot Backend (`springboot-documind`)
+- API REST principali (`/api/v1/...`)
+- Gestione utenti e sessioni tramite token in DB + cookie HttpOnly
+- Gestione metadati file (non storage binario)
+- Orchestrazione con backend Python per classificazione AI
+
+### 3) Python AI Backend (`backandpy-documind`)
+- Parsing testo da `.txt`, `.pdf`, `.docx`, `.md`, `.csv`, `.html`
+- Prompt engineering verso Ollama
+- Risposta multi-label con confidence score, summary e dati estratti
+- Fallback a regole keyword se output AI non coerente
+
+### Flusso runtime (end-to-end)
+
+```text
+Browser (Next.js UI)
+   -> Next.js API routes (/api/auth/*, /api/classify/*)
+   -> Spring Boot (/api/v1/*)
+   -> Flask AI (/api/classify)
+   -> Ollama (/api/generate)
+   -> ritorno risultato + regole soglia + UI feedback
+```
+
+---
+
+## ✨ Funzionalità implementate
+
+### Classificazione documenti
+- Upload e analisi file con tag multipli
+- Confidence score per tag
+- Esito a stati: `CLASSIFIED`, `PARTIAL_CONFIRMATION`, `CONFIRMATION_REQUIRED`, `LOW_CONFIDENCE`
+- Conferma manuale dei tag incerti
+- Cartella suggerita automaticamente in base ai tag
+
+### Gestione archivio
+- Lista file dell’utente autenticato
+- Filtri API su categoria, subtype, semantic type, tag e intervallo date
+- Update parziale metadati file
+- Cancellazione file metadata
+
+### Utenti e sessione
+- Registrazione utente
+- Login con email o telefono
+- Cookie `authentication-token` HttpOnly
+- Logout, estensione sessione, update profilo, update password, delete account
+- Seed automatico utente demo in profilo `dev`
+
+### Esperienza frontend
+- Dashboard con ricerca, filtri e ordinamento
+- Onboarding e privacy consent in `localStorage`
+- Gestione tag custom lato UI (attualmente in-memory/frontend state)
+- Sezione stato backend (`/api/backend/status`)
+
+---
+
+## 🧰 Stack tecnico
+
+### Backend Java
+- Java 21
+- Spring Boot 4.0.2
+- Spring Data JPA
+- Spring Security
+- MariaDB JDBC Driver
+- MapStruct
+- Maven Wrapper (`./mvnw`)
+
+### Backend Python
+- Python 3.11
+- Flask
+- flask-cors
+- requests
+- python-dotenv
+- PyPDF2
+- python-docx
+- Ollama (servizio esterno)
+
+### Frontend
+- Next.js 16.2.1
+- React 19.2.4
+- TypeScript
+- Redux Toolkit + React Redux
+- styled-components
+- ESLint 9
+
+### Infrastruttura
+- Docker Compose
+- MariaDB 11
+- Ollama container
+
+---
+
+## 📁 Struttura repository
+
+```text
+documind-app/
+├── README.md
+├── docker-compose.yml
+├── springboot-documind/
+│   ├── src/main/java/com/example/documind/
+│   │   ├── entities/users
+│   │   ├── entities/files
+│   │   ├── entities/classifications
+│   │   ├── security/tokens
+│   │   └── configurations
+│   └── src/main/resources/
+├── backandpy-documind/
+│   ├── app.py
+│   ├── requirements.txt
+│   └── .env
+├── frontend-documind/
+│   ├── app/
+│   ├── lib/
+│   └── package.json
+└── images/
+```
+
+---
+
+## 🚀 Quick Start (sviluppo locale)
+
+## Prerequisiti
 - Java 21+
 - Python 3.11+
 - Node.js 20+
-- MariaDB (o Docker)
-- [Ollama](https://ollama.com) installato con `qwen2.5:1.5b`
+- pnpm (o npm)
+- MariaDB in esecuzione
+- Ollama installato localmente
+
+### 1) Avvia Ollama e scarica un modello
 
 ```bash
+ollama serve
 ollama pull qwen2.5:1.5b
 ```
 
----
-
-### 1. Python AI Backend
+### 2) Avvia backend Python
 
 ```bash
-cd backandpy-documind
+cd /home/runner/work/documind-app/documind-app/backandpy-documind
 pip install -r requirements.txt
 python app.py
-# → http://localhost:5001
+# http://localhost:5001
 ```
 
-**Endpoint principali:**
-- `POST /api/classify` — classificazione multi-label con confidence scores
-- `POST /api/analyze` — estrazione dati strutturati (legacy)
-- `GET /api/health` — stato servizio
-
----
-
-### 2. Spring Boot Backend
+### 3) Avvia backend Spring
 
 ```bash
-cd springboot-documind
+cd /home/runner/work/documind-app/documind-app/springboot-documind
 ./mvnw spring-boot:run
-# → http://localhost:8080
+# http://localhost:8080
 ```
 
-**Configurazione** (`application-dev.properties`):
-```properties
-app.python.url=http://localhost:5001
-spring.datasource.url=jdbc:mariadb://localhost:3306/documind_app
+> Nota importante: `application-dev.properties` punta di default a `app.python.url=http://localhost:5002`, mentre il backend Python parte su `5001`.
+> In locale conviene forzare la variabile:
+>
+> ```bash
+> APP_PYTHON_URL=http://localhost:5001 ./mvnw spring-boot:run
+> ```
+
+### 4) Avvia frontend
+
+```bash
+cd /home/runner/work/documind-app/documind-app/frontend-documind
+pnpm install
+pnpm dev
+# http://localhost:3000
 ```
 
-**Endpoint principali:**
-- `POST /api/v1/classify/analyze` — analizza file (proxy → Python)
-- `POST /api/v1/classify/confirm` — conferma classificazione incerta
-- `POST /api/v1/user/in` — login
-- `GET /api/v1/files` — lista file utente
-
-**Credenziali di test (profilo dev):**
+### 5) Credenziali demo (profilo dev Spring)
 - Email: `test@documind.local`
 - Password: `test123`
+- Telefono: `+391111111111`
 
 ---
 
-### 3. Next.js Frontend
+## 🐳 Avvio con Docker Compose
+
+Da root repository:
 
 ```bash
-cd frontend-documind
-pnpm install   # oppure npm install
-pnpm dev
-# → http://localhost:3000
+docker-compose up -d --build
 ```
 
-**Pagine:**
-- `/` — Login
-- `/dashboard` — Archivio documenti con upload, classificazione, filtri
-- `/tags` — Gestione tag personalizzati
+Servizi esposti:
+- MariaDB: `localhost:3307`
+- Spring Boot: `localhost:8080`
+- Python AI: `localhost:5001`
 
----
-
-## 🔄 Flusso di classificazione
-
-```
-[Upload file] → Next.js → Spring Boot → Python AI (Ollama)
-                                ↓
-                    Confidence > 60%  →  CLASSIFIED (auto)
-                    50-60%            →  CONFIRMATION_REQUIRED (popup)
-                    < 50%             →  LOW_CONFIDENCE (Uncategorized)
-                                ↓
-                    Tags assegnati automaticamente
-                    Cartella suggerita
-```
-
----
-
-## 🐳 Deploy con Docker
+Dopo il primo avvio, caricare il modello nel container Ollama:
 
 ```bash
-docker-compose up -d
-
-# Prima dell'uso: scarica il modello Ollama nel container
 docker exec documind_ollama ollama pull qwen2.5:1.5b
 ```
 
 ---
 
-## 🧪 Test
+## 🔌 API Reference (Spring Boot)
 
-### Python
-```bash
-cd backandpy-documind
-curl -X POST -F "file=@documento.pdf" http://localhost:5001/api/classify
-```
+Base path: `/api/v1`
 
-### Spring Boot
+### User
+- `POST /api/v1/user` registrazione
+- `POST /api/v1/user/in` login
+- `POST /api/v1/user/out` logout
+- `POST /api/v1/user/me/extend-session` estende sessione
+- `PUT /api/v1/user/me` update telefono/email
+- `POST /api/v1/user/me/verify-password` verifica password attuale
+- `PUT /api/v1/user/me/password` cambia password
+- `DELETE /api/v1/user/me` cancella account
+
+### File metadata
+- `POST /api/v1/files` crea metadata file
+- `GET /api/v1/files` lista metadata utente
+- `GET /api/v1/files/{fileId}` dettaglio file
+- `PATCH /api/v1/files/{fileId}` update metadata
+- `DELETE /api/v1/files/{fileId}` cancella metadata
+
+Filtri supportati su `GET /api/v1/files`:
+- `category`
+- `subType`
+- `semanticType`
+- `tag`
+- `uploadedFrom`
+- `uploadedTo`
+
+### Classificazione
+- `POST /api/v1/classify/analyze` upload + analisi AI
+- `POST /api/v1/classify/confirm` conferma classificazione incerta
+
+### Token maintenance
+- `DELETE /api/v1/tokens/user/{userId}` cancella token utente (richiede Authorization header)
+
+---
+
+## 🤖 API Reference (Python AI)
+
+- `POST /api/classify` endpoint principale multi-label
+- `POST /api/analyze` endpoint legacy compatibile
+- `GET /api/tags/default` elenco tag di sistema
+- `GET /api/health` stato servizio e modello Ollama
+
+Output classificazione include:
+- `tags` (nome + confidence + categoria)
+- `primary_tags`
+- `summary`
+- `extracted_data`
+- `metadata`
+
+---
+
+## 🗃️ Modello dati (Spring)
+
+### `users`
+Contiene anagrafica utente, credenziali, ruolo e metadati account.
+
+### `token`
+Token di sessione persistiti a DB con `created_at` e `expires_at`.
+
+### `files`
+Metadati documento: nome, path, hash, categoria/subtype tecnici, semantic type, score AI, tag, owner, timestamp.
+
+Vincoli rilevanti:
+- `hash` univoco globale
+- ownership file legata all’email utente
+- update email utente con migrazione ownership file
+
+---
+
+## 🔐 Sicurezza (stato attuale)
+
+Implementato:
+- Cookie sessione `authentication-token` con `HttpOnly` e `SameSite=Lax`
+- Validazione token lato backend per operazioni utente/file
+- Validazione payload file con `FileValidator`
+- Gestione errori centralizzata con `GlobalExceptionHandler`
+
+Da considerare per hardening produzione:
+- password utente attualmente confrontate/salvate senza hashing applicativo esplicito
+- in `dev` la security è aperta (`permitAll`)
+- cookie `secure=false` (adeguare in HTTPS reale)
+- cache analisi pendenti in-memory (`ConcurrentHashMap`) e non persistente
+
+---
+
+## 🧪 Test e qualità
+
+Test presenti nel modulo Spring:
+
+- `DocumindApplicationTests`
+- `FileValidatorTest`
+
+Comando:
+
 ```bash
-cd springboot-documind
+cd /home/runner/work/documind-app/documind-app/springboot-documind
 ./mvnw test
 ```
 
----
+Frontend:
 
-## 📋 Categorie di classificazione
-
-| Tipo | Descrizione |
-|------|-------------|
-| Invoice | Fattura |
-| Receipt | Ricevuta |
-| Contract | Contratto |
-| Resume | Curriculum vitae |
-| Personal Document | Documento personale |
-| Legal Document | Documento legale |
-| Poetry | Poesia |
-| Literature | Opera letteraria |
-| Code | Codice sorgente |
-| Spreadsheet | Foglio di calcolo |
-| Report | Report/Relazione |
-| Email | Email |
-| Financial Document | Documento finanziario |
-| Medical Document | Documento medico |
-| Technical Document | Documento tecnico |
+```bash
+cd /home/runner/work/documind-app/documind-app/frontend-documind
+pnpm lint
+pnpm build
+```
 
 ---
 
-## ⚠️ Note importanti
+## 🖼️ Screenshots
 
-- L'AI gira **localmente** tramite Ollama: nessun dato inviato a server esterni
-- Il modello `qwen2.5:1.5b` richiede circa ~1-2GB RAM
-- Le analisi pendenti (50-60% confidence) sono in memoria: riavviare Spring Boot le azzera
-- In produzione, usare Redis per la cache delle analisi pendenti
+![Architettura/Schema](images/Mappa_innovetion_week.png)
 
+![UI Preview](images/proxy-image.jpg)
 
-## Implementazione
+---
 
-- persistenza file upload
-- aggiorna file
-- analisi con percentuale
-- utente immagine upload anti expload 
-- Persistenza tag custom nel DB (serve endpoint `/api/v1/tags` in Spring Boot)
-- Upload file senza analisi con scelta cartella/tag nel frontend
-- Sezione tag management collegata al backend
-- Test unitari per il nuovo `ClassificationService`
+## ⚠️ Limiti noti
 
+- Il modulo tag management frontend è locale (non ancora persistito via API dedicata)
+- La classificazione pending su Spring è volatile (si perde al riavvio)
+- Esiste disallineamento porta Python (`5001` vs `5002` in dev properties)
+- Il repository contiene cartelle `.temporary` non parte del runtime principale
+
+---
+
+## 📈 Roadmap tecnica suggerita
+
+- Persistenza server-side dei tag custom (`/api/v1/tags`)
+- Persistenza documenti binari (non solo metadata)
+- Hardening autenticazione (password hashing + policy)
+- Storage distribuito per pending analysis (Redis/DB)
+- Copertura test end-to-end tra frontend, Spring e Python
+
+---
+
+## 🤝 Contribuire
+
+1. Crea un branch feature
+2. Mantieni i cambi scoped e testabili
+3. Aggiorna README/API docs quando modifichi contratti endpoint
+4. Apri Pull Request con descrizione tecnica chiara
 

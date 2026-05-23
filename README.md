@@ -1,258 +1,260 @@
-# 🧠 DocuMind App
-
-DocuMind è una piattaforma full-stack per **archiviazione e classificazione intelligente dei documenti** con AI locale (Ollama), composta da tre servizi principali:
-
-- **Frontend**: Next.js 16 + React 19 (`frontend-documind`)
-- **Backend API**: Spring Boot 4 + MariaDB (`springboot-documind`)
-- **AI Engine**: Flask + Ollama (`backandpy-documind`)
-
-L’obiettivo è gestire il ciclo completo: autenticazione utente, caricamento documento, analisi semantica multi-tag, conferma umana dei casi incerti e consultazione archivio.
+# 🧠 DocuMind — Intelligent Document Classification Platform
 
 ---
 
-## 📌 Executive Summary
+## 📋 Overview
 
-Il repository implementa una pipeline ibrida:
+**DocuMind** is a full-stack, multi-service application for uploading, classifying, and organizing documents using **local AI inference with Ollama**. The project is split into three runtime modules: a **Spring Boot backend** for business/API logic, a **Python Flask AI service** for document analysis, and a **Next.js frontend** for user workflows.
 
-1. l’utente carica un file dal frontend;
-2. Spring Boot inoltra il file al servizio Python;
-3. Python estrae testo, chiama Ollama e produce tag con confidence score;
-4. Spring Boot applica soglie decisionali:
-   - `>= 0.75`: classificazione automatica;
-   - `0.45 - 0.74`: conferma utente richiesta;
-   - `< 0.45`: bassa confidenza.
-5. il frontend mostra risultato, popup di conferma (se necessario) e organizzazione in cartelle suggerite.
+The platform is designed to support a real classification lifecycle: file ingestion, multi-label confidence scoring, human confirmation for uncertain predictions, and user-scoped archive management.
 
----
-
-## 🏗️ Architettura del sistema
-
-### Componenti
-
-### 1) Frontend (`frontend-documind`)
-- Interfaccia utente (login, signup, dashboard, tag management)
-- Stato locale con Redux Toolkit
-- API Routes Next.js come BFF/proxy verso Spring Boot
-- UI con `styled-components`
-
-### 2) Spring Boot Backend (`springboot-documind`)
-- API REST principali (`/api/v1/...`)
-- Gestione utenti e sessioni tramite token in DB + cookie HttpOnly
-- Gestione metadati file (non storage binario)
-- Orchestrazione con backend Python per classificazione AI
-
-### 3) Python AI Backend (`backandpy-documind`)
-- Parsing testo da `.txt`, `.pdf`, `.docx`, `.md`, `.csv`, `.html`
-- Prompt engineering verso Ollama
-- Risposta multi-label con confidence score, summary e dati estratti
-- Fallback a regole keyword se output AI non coerente
-
-### Flusso runtime (end-to-end)
-
-```text
-Browser (Next.js UI)
-   -> Next.js API routes (/api/auth/*, /api/classify/*)
-   -> Spring Boot (/api/v1/*)
-   -> Flask AI (/api/classify)
-   -> Ollama (/api/generate)
-   -> ritorno risultato + regole soglia + UI feedback
-```
+- 🧠 **AI-assisted classification** — multi-tag analysis with confidence thresholds and fallback keyword rules
+- 🧩 **Modular architecture** — Spring API + Python AI engine + Next.js UI
+- 🔐 **Session-based auth** — token persisted in DB and sent via HttpOnly cookie
+- 📂 **Metadata archive** — owner-scoped file metadata with filters, update, and delete
+- 🐳 **Container-ready** — docker-compose for DB + API + AI + Ollama runtime
 
 ---
 
-## ✨ Funzionalità implementate
+## ✨ Features
 
-### Classificazione documenti
-- Upload e analisi file con tag multipli
-- Confidence score per tag
-- Esito a stati: `CLASSIFIED`, `PARTIAL_CONFIRMATION`, `CONFIRMATION_REQUIRED`, `LOW_CONFIDENCE`
-- Conferma manuale dei tag incerti
-- Cartella suggerita automaticamente in base ai tag
+### Task Management
 
-### Gestione archivio
-- Lista file dell’utente autenticato
-- Filtri API su categoria, subtype, semantic type, tag e intervallo date
-- Update parziale metadati file
-- Cancellazione file metadata
+| Feature | Description |
+|---|---|
+| 📤 Upload and analyze documents | Files are analyzed through the AI service and returned with semantic tags and confidence |
+| 🏷️ Multi-label tagging | A document can receive multiple tags (independent confidence scores) |
+| 🤔 Human confirmation flow | Medium-confidence predictions are marked for manual confirmation |
+| 📁 Suggested folders | Spring maps confirmed/automatic tags to domain folders (Finance, Legal, Tech, etc.) |
+| 🗂️ Archive views | Dashboard supports search, sorting, folder navigation, and state filters |
+| ✏️ Metadata update | File metadata can be patched (name, tags, semantic attributes, flags) |
+| 🗑️ Metadata deletion | Owner can delete file records from personal archive |
 
-### Utenti e sessione
-- Registrazione utente
-- Login con email o telefono
-- Cookie `authentication-token` HttpOnly
-- Logout, estensione sessione, update profilo, update password, delete account
-- Seed automatico utente demo in profilo `dev`
+### User Management
 
-### Esperienza frontend
-- Dashboard con ricerca, filtri e ordinamento
-- Onboarding e privacy consent in `localStorage`
-- Gestione tag custom lato UI (attualmente in-memory/frontend state)
-- Sezione stato backend (`/api/backend/status`)
+| Feature | Description |
+|---|---|
+| 📝 Registration | Create a user via `/api/v1/user` |
+| 🔑 Login / Logout | Authenticate with email or telephone; receive `authentication-token` cookie |
+| 👤 Profile update | Update account fields (`telephone` / `email`) via `/api/v1/user/me` |
+| 🔒 Password verify/change | Verify old password then update password via dedicated endpoints |
+| ⏱️ Session extension | Extend active token expiration via `/api/v1/user/me/extend-session` |
+| 💀 Account deletion | Remove user account and related owned file metadata |
+| 🧪 Dev seed user | Auto-seeded test user in `dev` profile for local testing |
+
+### UI / UX
+
+| Feature | Description |
+|---|---|
+| 🖥️ Modern web UI | Next.js app with dedicated login, signup, dashboard, and tags pages |
+| 🧭 Guided onboarding | Privacy consent and onboarding state persisted in browser `localStorage` |
+| 📊 Classification feedback | Rich result cards, pending confirmation popup, and archive statistics |
+| 🏷️ Tag management UI | Custom tag creation/edit/delete flow in frontend state |
+| 🔁 API proxy layer | Next API routes proxy auth/classification requests to Spring backend |
 
 ---
 
-## 🧰 Stack tecnico
+## 📸 Screenshots
 
-### Backend Java
-- Java 21
-- Spring Boot 4.0.2
-- Spring Data JPA
-- Spring Security
-- MariaDB JDBC Driver
-- MapStruct
-- Maven Wrapper (`./mvnw`)
+![System architecture map](images/Mappa_innovetion_week.png)
 
-### Backend Python
-- Python 3.11
-- Flask
-- flask-cors
-- requests
-- python-dotenv
-- PyPDF2
-- python-docx
-- Ollama (servizio esterno)
+![UI preview](images/proxy-image.jpg)
+
+---
+
+## 🛠 Tech Stack
+
+### Backend
+
+| Technology | Version | Purpose |
+|---|---|---|
+| Java | 21 | Core language for Spring backend |
+| Spring Boot | 4.0.2 | REST API and application runtime |
+| Spring Data JPA | (via starter) | Persistence and repository abstraction |
+| Spring Security | (via starter) | Security configuration and auth rules |
+| MariaDB JDBC Driver | Runtime | Database connectivity |
+| MapStruct | 1.5.5.Final | DTO/entity mapping |
+| Python | 3.11 | AI service runtime |
+| Flask | Latest (requirements) | AI HTTP service |
+| Requests | Latest (requirements) | Ollama HTTP integration |
+| PyPDF2 / python-docx | Latest (requirements) | Text extraction from PDF/DOCX |
+| Ollama | Local runtime | LLM inference engine for classification |
+| Maven Wrapper | Included | Build/test/run for Spring module |
 
 ### Frontend
-- Next.js 16.2.1
-- React 19.2.4
-- TypeScript
-- Redux Toolkit + React Redux
-- styled-components
-- ESLint 9
 
-### Infrastruttura
-- Docker Compose
-- MariaDB 11
-- Ollama container
+| Technology | Version | Purpose |
+|---|---|---|
+| Next.js | 16.2.1 | Frontend framework and API routes |
+| React | 19.2.4 | UI components |
+| TypeScript | 5.x | Static typing |
+| Redux Toolkit | 2.11.2 | Client-side state management |
+| styled-components | 6.3.12 | Component-scoped styling |
+| ESLint | 9.x | Linting |
 
 ---
 
-## 📁 Struttura repository
+## 🚀 Quick Start
 
-```text
-documind-app/
-├── README.md
-├── docker-compose.yml
-├── springboot-documind/
-│   ├── src/main/java/com/example/documind/
-│   │   ├── entities/users
-│   │   ├── entities/files
-│   │   ├── entities/classifications
-│   │   ├── security/tokens
-│   │   └── configurations
-│   └── src/main/resources/
-├── backandpy-documind/
-│   ├── app.py
-│   ├── requirements.txt
-│   └── .env
-├── frontend-documind/
-│   ├── app/
-│   ├── lib/
-│   └── package.json
-└── images/
+### Prerequisites
+
+- **Java 21+**
+- **Python 3.11+**
+- **Node.js 20+**
+- **pnpm or npm**
+- **MariaDB** reachable by Spring backend
+- **Ollama** installed and running locally (or in Docker)
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/Alex3725/documind-app.git
+cd documind-app
 ```
 
----
-
-## 🚀 Quick Start (sviluppo locale)
-
-## Prerequisiti
-- Java 21+
-- Python 3.11+
-- Node.js 20+
-- pnpm (o npm)
-- MariaDB in esecuzione
-- Ollama installato localmente
-
-### 1) Avvia Ollama e scarica un modello
+### 2. Set Up AI Model (Ollama)
 
 ```bash
 ollama serve
 ollama pull qwen2.5:1.5b
 ```
 
-### 2) Avvia backend Python
+> The Python service can also attempt model pull automatically if missing, but pre-pulling is recommended.
 
-```bash
-cd /home/runner/work/documind-app/documind-app/backandpy-documind
-pip install -r requirements.txt
-python app.py
-# http://localhost:5001
+### 3. Configure the Application
+
+**Spring config** is in:
+
+```properties
+/home/runner/work/documind-app/documind-app/springboot-documind/src/main/resources/application.properties
+/home/runner/work/documind-app/documind-app/springboot-documind/src/main/resources/application-dev.properties
 ```
 
-### 3) Avvia backend Spring
+Key values:
 
-```bash
-cd /home/runner/work/documind-app/documind-app/springboot-documind
-./mvnw spring-boot:run
-# http://localhost:8080
+```properties
+spring.datasource.url=jdbc:mariadb://localhost:3306/documind_app
+spring.datasource.username=alex
+app.python.url=http://localhost:5002
 ```
 
-> Nota importante: `application-dev.properties` punta di default a `app.python.url=http://localhost:5002`, mentre il backend Python parte su `5001`.
-> In locale conviene forzare la variabile:
+> ⚠️ **Important:** Python backend runs on **5001** by default (`backandpy-documind/app.py`), while `application-dev.properties` currently points to `5002`.
+> Use runtime override when starting Spring locally:
 >
 > ```bash
 > APP_PYTHON_URL=http://localhost:5001 ./mvnw spring-boot:run
 > ```
 
-### 4) Avvia frontend
+### 4. Build and Run
+
+Run the 3 modules in separate terminals:
 
 ```bash
-cd /home/runner/work/documind-app/documind-app/frontend-documind
+# 1) Python AI backend
+cd backandpy-documind
+pip install -r requirements.txt
+python app.py
+
+# 2) Spring backend
+cd ../springboot-documind
+./mvnw spring-boot:run
+
+# 3) Next.js frontend
+cd ../frontend-documind
 pnpm install
 pnpm dev
-# http://localhost:3000
 ```
 
-### 5) Credenziali demo (profilo dev Spring)
+### 5. Open in Browser
+
+```
+http://localhost:3000
+```
+
+Use dev seeded credentials (Spring `dev` profile):
+
 - Email: `test@documind.local`
 - Password: `test123`
-- Telefono: `+391111111111`
 
 ---
 
-## 🐳 Avvio con Docker Compose
+## 🗂 Project Structure
 
-Da root repository:
-
-```bash
-docker-compose up -d --build
-```
-
-Servizi esposti:
-- MariaDB: `localhost:3307`
-- Spring Boot: `localhost:8080`
-- Python AI: `localhost:5001`
-
-Dopo il primo avvio, caricare il modello nel container Ollama:
-
-```bash
-docker exec documind_ollama ollama pull qwen2.5:1.5b
+```text
+documind-app/
+│
+├── README.md
+├── docker-compose.yml
+├── images/
+│   ├── Mappa_innovetion_week.png
+│   └── proxy-image.jpg
+│
+├── springboot-documind/
+│   ├── pom.xml
+│   ├── Dockerfile
+│   └── src/
+│       ├── main/java/com/example/documind/
+│       │   ├── DocumindApplication.java
+│       │   ├── entities/
+│       │   │   ├── users/
+│       │   │   ├── files/
+│       │   │   └── classifications/
+│       │   ├── security/tokens/
+│       │   └── configurations/
+│       └── main/resources/
+│           ├── application.properties
+│           ├── application-dev.properties
+│           └── application-prod.properties
+│
+├── backandpy-documind/
+│   ├── app.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── .env
+│
+└── frontend-documind/
+    ├── package.json
+    ├── app/
+    │   ├── page.tsx
+    │   ├── dashboard/
+    │   ├── signup/
+    │   └── api/
+    └── lib/
+        ├── components/
+        └── features/
 ```
 
 ---
 
-## 🔌 API Reference (Spring Boot)
+## 📡 API Reference
 
-Base path: `/api/v1`
+Spring endpoints are prefixed with `/api/v1`. Authentication is carried in the HttpOnly cookie `authentication-token`.
 
-### User
-- `POST /api/v1/user` registrazione
-- `POST /api/v1/user/in` login
-- `POST /api/v1/user/out` logout
-- `POST /api/v1/user/me/extend-session` estende sessione
-- `PUT /api/v1/user/me` update telefono/email
-- `POST /api/v1/user/me/verify-password` verifica password attuale
-- `PUT /api/v1/user/me/password` cambia password
-- `DELETE /api/v1/user/me` cancella account
+### 👤 User Endpoints — `/api/v1/user`
 
-### File metadata
-- `POST /api/v1/files` crea metadata file
-- `GET /api/v1/files` lista metadata utente
-- `GET /api/v1/files/{fileId}` dettaglio file
-- `PATCH /api/v1/files/{fileId}` update metadata
-- `DELETE /api/v1/files/{fileId}` cancella metadata
+| Method | Path | Auth Required | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/user` | ❌ | Register a new user |
+| `POST` | `/api/v1/user/in` | ❌ | Login and issue session cookie |
+| `POST` | `/api/v1/user/out` | ✅ | Logout and clear session cookie |
+| `POST` | `/api/v1/user/me/extend-session` | ✅ | Extend current token validity |
+| `PUT` | `/api/v1/user/me` | ✅ | Update telephone/email |
+| `POST` | `/api/v1/user/me/verify-password` | ✅ | Verify current password |
+| `PUT` | `/api/v1/user/me/password` | ✅ | Update password |
+| `DELETE` | `/api/v1/user/me` | ✅ | Delete account |
 
-Filtri supportati su `GET /api/v1/files`:
+### 📁 File Endpoints — `/api/v1/files`
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/files` | Create file metadata |
+| `GET` | `/api/v1/files` | List authenticated user files |
+| `GET` | `/api/v1/files/{fileId}` | Get one file metadata |
+| `PATCH` | `/api/v1/files/{fileId}` | Partial metadata update |
+| `DELETE` | `/api/v1/files/{fileId}` | Delete file metadata |
+
+`GET /api/v1/files` filters:
+
 - `category`
 - `subType`
 - `semanticType`
@@ -260,120 +262,99 @@ Filtri supportati su `GET /api/v1/files`:
 - `uploadedFrom`
 - `uploadedTo`
 
-### Classificazione
-- `POST /api/v1/classify/analyze` upload + analisi AI
-- `POST /api/v1/classify/confirm` conferma classificazione incerta
+### 🧠 Classification Endpoints — `/api/v1/classify`
 
-### Token maintenance
-- `DELETE /api/v1/tokens/user/{userId}` cancella token utente (richiede Authorization header)
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/classify/analyze` | Analyze uploaded file via Python AI |
+| `POST` | `/api/v1/classify/confirm` | Confirm uncertain tags |
 
----
+### 🤖 Python AI Endpoints (Flask)
 
-## 🤖 API Reference (Python AI)
-
-- `POST /api/classify` endpoint principale multi-label
-- `POST /api/analyze` endpoint legacy compatibile
-- `GET /api/tags/default` elenco tag di sistema
-- `GET /api/health` stato servizio e modello Ollama
-
-Output classificazione include:
-- `tags` (nome + confidence + categoria)
-- `primary_tags`
-- `summary`
-- `extracted_data`
-- `metadata`
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/classify` | Main multi-label classification endpoint |
+| `POST` | `/api/analyze` | Legacy structured extraction endpoint |
+| `GET` | `/api/tags/default` | Return built-in default tags |
+| `GET` | `/api/health` | Service + Ollama status |
 
 ---
 
-## 🗃️ Modello dati (Spring)
+## ⚙️ Configuration
 
-### `users`
-Contiene anagrafica utente, credenziali, ruolo e metadati account.
+Main Spring settings:
 
-### `token`
-Token di sessione persistiti a DB con `created_at` e `expires_at`.
-
-### `files`
-Metadati documento: nome, path, hash, categoria/subtype tecnici, semantic type, score AI, tag, owner, timestamp.
-
-Vincoli rilevanti:
-- `hash` univoco globale
-- ownership file legata all’email utente
-- update email utente con migrazione ownership file
-
----
-
-## 🔐 Sicurezza (stato attuale)
-
-Implementato:
-- Cookie sessione `authentication-token` con `HttpOnly` e `SameSite=Lax`
-- Validazione token lato backend per operazioni utente/file
-- Validazione payload file con `FileValidator`
-- Gestione errori centralizzata con `GlobalExceptionHandler`
-
-Da considerare per hardening produzione:
-- password utente attualmente confrontate/salvate senza hashing applicativo esplicito
-- in `dev` la security è aperta (`permitAll`)
-- cookie `secure=false` (adeguare in HTTPS reale)
-- cache analisi pendenti in-memory (`ConcurrentHashMap`) e non persistente
-
----
-
-## 🧪 Test e qualità
-
-Test presenti nel modulo Spring:
-
-- `DocumindApplicationTests`
-- `FileValidatorTest`
-
-Comando:
-
-```bash
-cd /home/runner/work/documind-app/documind-app/springboot-documind
-./mvnw test
+```properties
+spring.application.name=documind
+spring.profiles.default=dev
+spring.datasource.url=jdbc:mariadb://localhost:3306/documind_app
+spring.datasource.username=alex
+spring.datasource.driver-class-name=org.mariadb.jdbc.Driver
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
 ```
 
-Frontend:
+Dev profile extras:
 
-```bash
-cd /home/runner/work/documind-app/documind-app/frontend-documind
-pnpm lint
-pnpm build
+```properties
+app.seed.user.email=test@documind.local
+app.seed.user.telephone=+391111111111
+app.python.url=http://localhost:5002
+spring.servlet.multipart.max-file-size=200MB
+spring.servlet.multipart.max-request-size=200MB
 ```
 
----
+Python `.env` (AI backend):
 
-## 🖼️ Screenshots
+```properties
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:1.5b
+```
 
-![Architettura/Schema](images/Mappa_innovetion_week.png)
+### Recommended Changes for Production
 
-![UI Preview](images/proxy-image.jpg)
-
----
-
-## ⚠️ Limiti noti
-
-- Il modulo tag management frontend è locale (non ancora persistito via API dedicata)
-- La classificazione pending su Spring è volatile (si perde al riavvio)
-- Esiste disallineamento porta Python (`5001` vs `5002` in dev properties)
-- Il repository contiene cartelle `.temporary` non parte del runtime principale
-
----
-
-## 📈 Roadmap tecnica suggerita
-
-- Persistenza server-side dei tag custom (`/api/v1/tags`)
-- Persistenza documenti binari (non solo metadata)
-- Hardening autenticazione (password hashing + policy)
-- Storage distribuito per pending analysis (Redis/DB)
-- Copertura test end-to-end tra frontend, Spring e Python
+| Setting | Recommended Value |
+|---|---|
+| `spring.jpa.hibernate.ddl-auto` | `validate` (or controlled migration strategy) |
+| `spring.jpa.show-sql` | `false` |
+| `SPRING_PROFILES_ACTIVE` | `prod` |
+| `app.python.url` | Internal/private service URL |
+| Cookie `secure` flag | `true` under HTTPS |
 
 ---
 
-## 🤝 Contribuire
+## 🔒 Security
 
-1. Crea un branch feature
-2. Mantieni i cambi scoped e testabili
-3. Aggiorna README/API docs quando modifichi contratti endpoint
-4. Apri Pull Request con descrizione tecnica chiara
+The current implementation includes the following controls and constraints:
+
+### Authentication & Sessions
+
+- **DB-backed token sessions** — token records are persisted in `token` table with expiration.
+- **HttpOnly cookie transport** — `authentication-token` is set as HttpOnly cookie.
+- **SameSite cookie setting** — cookie is issued with `SameSite=Lax` in login flow.
+- **Session extension endpoint** — explicit API to prolong token validity.
+
+### Request and Domain Validation
+
+- **File payload validation** — `FileValidator` enforces required metadata, hash length, confidence range, and category/subtype coherence.
+- **Centralized API error handling** — `GlobalExceptionHandler` returns structured API errors with status/code/path.
+- **Owner-scoped access checks** — file operations resolve owner from valid token before read/write/delete.
+
+### AI Pipeline Controls
+
+- **Allowed file extensions** on Python service (`.txt`, `.pdf`, `.docx`, `.md`, `.csv`, `.html`).
+- **Max upload size** configured both in Python and Spring profile config.
+- **Fallback keyword scoring** when Ollama output lacks usable tag scores.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome.
+
+1. Fork the repository
+2. Create a feature branch
+3. Keep changes scoped by module (`springboot-documind`, `backandpy-documind`, `frontend-documind`)
+4. Validate with existing commands (`./mvnw test`, `pnpm lint`, `pnpm build` where relevant)
+5. Open a Pull Request with clear technical notes
 

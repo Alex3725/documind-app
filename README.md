@@ -1,4 +1,4 @@
-# 🧠 DocuMind — Intelligent Document Classification Platform
+![logo_documind](images/logo.png)
 
 ---
 
@@ -51,14 +51,6 @@ The platform is designed to support a real classification lifecycle: file ingest
 | 📊 Classification feedback | Rich result cards, pending confirmation popup, and archive statistics |
 | 🏷️ Tag management UI | Custom tag creation/edit/delete flow in frontend state |
 | 🔁 API proxy layer | Next API routes proxy auth/classification requests to Spring backend |
-
----
-
-## 📸 Screenshots
-
-![System architecture map](images/Mappa_innovetion_week.png)
-
-![UI preview](images/proxy-image.jpg)
 
 ---
 
@@ -345,16 +337,3 @@ The current implementation includes the following controls and constraints:
 - **Allowed file extensions** on Python service (`.txt`, `.pdf`, `.docx`, `.md`, `.csv`, `.html`).
 - **Max upload size** configured both in Python and Spring profile config.
 - **Fallback keyword scoring** when Ollama output lacks usable tag scores.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome.
-
-1. Fork the repository
-2. Create a feature branch
-3. Keep changes scoped by module (`springboot-documind`, `backandpy-documind`, `frontend-documind`)
-4. Validate with existing commands (`./mvnw test`, `pnpm lint`, `pnpm build` where relevant)
-5. Open a Pull Request with clear technical notes
-

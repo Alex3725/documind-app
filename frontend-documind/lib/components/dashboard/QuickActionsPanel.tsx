@@ -6,6 +6,9 @@ import styled from "styled-components";
 type AddFolderPayload = {
   name: string;
   description: string;
+  semanticRules: string;
+  autoUpdateType: boolean;
+  autoTags: string[];
 };
 
 type Props = {
@@ -20,21 +23,36 @@ export default function QuickActionsPanel({ foldersCount, onAddFolder, onAddType
   const [showFileModal, setShowFileModal] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderDescription, setFolderDescription] = useState("");
+  const [useFolderNameAsTag, setUseFolderNameAsTag] = useState(true);
+  const [customTagName, setCustomTagName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [busy, setBusy] = useState<"none" | "folder" | "file">("none");
 
   const disableFolderSave = useMemo(() => {
-    return folderName.trim().length < 2 || busy !== "none";
-  }, [folderName, busy]);
+    const tagName = useFolderNameAsTag ? folderName.trim() : customTagName.trim();
+    return folderName.trim().length < 2 || tagName.length < 2 || busy !== "none";
+  }, [folderName, busy, useFolderNameAsTag, customTagName]);
 
   const handleSaveFolder = async () => {
     if (disableFolderSave) return;
     setBusy("folder");
     try {
-      await onAddFolder({ name: folderName.trim(), description: folderDescription.trim() });
+      const normalizedName = folderName.trim();
+      const semanticRules = folderDescription.trim();
+      const tagName = useFolderNameAsTag ? normalizedName : customTagName.trim();
+
+      await onAddFolder({
+        name: normalizedName,
+        description: semanticRules,
+        semanticRules,
+        autoUpdateType: useFolderNameAsTag,
+        autoTags: tagName ? [tagName] : [],
+      });
       setShowFolderModal(false);
       setFolderName("");
       setFolderDescription("");
+      setUseFolderNameAsTag(true);
+      setCustomTagName("");
     } finally {
       setBusy("none");
     }
@@ -72,11 +90,31 @@ export default function QuickActionsPanel({ foldersCount, onAddFolder, onAddType
               value={folderName}
               onChange={(e) => setFolderName(e.target.value)}
             />
+            <SwitchRow>
+              <SwitchLabel>
+                <SwitchInput
+                  type="checkbox"
+                  checked={useFolderNameAsTag}
+                  onChange={(e) => setUseFolderNameAsTag(e.target.checked)}
+                />
+                <span>Usa nome cartella come tag</span>
+              </SwitchLabel>
+            </SwitchRow>
+            {!useFolderNameAsTag && (
+              <Input
+                placeholder="Nome tag personalizzato"
+                value={customTagName}
+                onChange={(e) => setCustomTagName(e.target.value)}
+              />
+            )}
             <Textarea
-              placeholder="Descrizione semantica"
+              placeholder="Descrizione semantica usata per trovare i file"
               value={folderDescription}
               onChange={(e) => setFolderDescription(e.target.value)}
             />
+            <Hint>
+              Se lo switch è attivo il tag coincide con il nome cartella. Se lo disattivi, il backend userà la descrizione per assegnare il tag scelto.
+            </Hint>
             <ModalActions>
               <GhostBtn type="button" onClick={() => setShowFolderModal(false)}>Annulla</GhostBtn>
               <PrimaryBtn type="button" onClick={handleSaveFolder} disabled={disableFolderSave}>
@@ -121,11 +159,11 @@ export default function QuickActionsPanel({ foldersCount, onAddFolder, onAddType
 }
 
 const Panel = styled.section`
-  background: #1e88e5;
-  border: 1px solid #1976d2;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #dbe4e0;
   border-radius: 16px;
   padding: 14px;
-  color: #eff6ff;
+  color: #0f172a;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -133,19 +171,41 @@ const Panel = styled.section`
 `;
 
 const Title = styled.h3`margin:0;font-size:0.96rem;font-weight:800;`;
-const Sub = styled.div`font-size:0.78rem;opacity:0.95;`;
+const Sub = styled.div`font-size:0.78rem;color:#64748b;`;
 const Actions = styled.div`display:flex;flex-direction:column;gap:8px;`;
 
 const MainBtn = styled.button`
-  border: 1px solid #93c5fd;
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
+  border: 1px solid #dbe4e0;
+  background: #fff;
+  color: #0f172a;
   padding: 9px 12px;
   border-radius: 10px;
   font-size: 0.86rem;
   font-weight: 700;
   text-align: left;
   cursor: pointer;
+`;
+
+const SwitchRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+`;
+
+const SwitchLabel = styled.label`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 600;
+`;
+
+const SwitchInput = styled.input`
+  width: 16px;
+  height: 16px;
+  accent-color: #1f2937;
 `;
 
 const ModalOverlay = styled.div`

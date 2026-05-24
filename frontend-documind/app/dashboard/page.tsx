@@ -20,6 +20,8 @@ import SearchStrip from "@/lib/components/dashboard/SearchStrip";
 import MemoryCircleCard from "@/lib/components/dashboard/MemoryCircleCard";
 import QuickActionsPanel from "@/lib/components/dashboard/QuickActionsPanel";
 import FoldersBoard from "@/lib/components/dashboard/FoldersBoard";
+import WorkspacePathBar from "@/lib/components/dashboard/WorkspacePathBar";
+import WorkspacePreviewCard from "@/lib/components/dashboard/WorkspacePreviewCard";
 import { useRouter } from "next/navigation";
 import { logoutState } from "@/lib/features/authSlice";
 import TutorialOverlay from "@/lib/components/TutorialOverlay";
@@ -103,11 +105,20 @@ export default function DashboardPage() {
     router.push("/");
   };
 
-  const handleCreateFolder = async (payload: { name: string; description: string }) => {
+  const handleCreateFolder = async (payload: {
+    name: string;
+    description: string;
+    semanticRules: string;
+    autoUpdateType: boolean;
+    autoTags: string[];
+  }) => {
     const result = await dispatch(
       createFolder({
         name: payload.name,
         description: payload.description,
+        semanticRules: payload.semanticRules,
+        autoUpdateType: payload.autoUpdateType,
+        autoTags: payload.autoTags,
       })
     );
     if (createFolder.rejected.match(result)) {
@@ -167,9 +178,14 @@ export default function DashboardPage() {
           onOpenTutorial={() => setShowTutorial(true)}
         />
 
+        <WorkspacePathBar
+          folderCount={folders.filter((f) => !f.system).length}
+          fileCount={files.length}
+        />
+
         <SearchStrip value={searchTerm} onChange={setSearchTerm} />
 
-        <Grid>
+        <WorkspaceGrid>
           <LeftCol>
             <QuickActionsPanel
               foldersCount={folders.filter((f) => !f.system).length}
@@ -184,44 +200,51 @@ export default function DashboardPage() {
             />
           </LeftCol>
 
-          <RightCol>
+          <CenterCol>
             <FoldersBoard searchTerm={searchTerm} onSearchTermChange={setSearchTerm} />
-          </RightCol>
-        </Grid>
+          </CenterCol>
 
-        {status === "loading" && (
-          <AnalyzingBanner>
-            <AnalyzingSpinner />
-            Analisi AI in corso — Classificazione gerarchica a 3 livelli...
-          </AnalyzingBanner>
-        )}
+          <RightRail>
+            <RailCard>
+              <RailTitle>Stato workspace</RailTitle>
+              <StatsRow>
+                <StatCard>
+                  <StatNum>{files.length}</StatNum>
+                  <StatLabel>File totali</StatLabel>
+                </StatCard>
+                <StatCard $accent="#1b6f5c">
+                  <StatNum>{statsClassified}</StatNum>
+                  <StatLabel>Classificati AI</StatLabel>
+                </StatCard>
+                {statsPending > 0 && (
+                  <StatCard $accent="#d97706">
+                    <StatNum>{statsPending}</StatNum>
+                    <StatLabel>In attesa</StatLabel>
+                  </StatCard>
+                )}
+                <StatCard $accent="#6b7280">
+                  <StatNum>{statsLow}</StatNum>
+                  <StatLabel>Non classificati</StatLabel>
+                </StatCard>
+                {statsManual > 0 && (
+                  <StatCard $accent="#8b5cf6">
+                    <StatNum>{statsManual}</StatNum>
+                    <StatLabel>Manuale</StatLabel>
+                  </StatCard>
+                )}
+              </StatsRow>
+            </RailCard>
 
-        <StatsRow>
-          <StatCard>
-            <StatNum>{files.length}</StatNum>
-            <StatLabel>File totali</StatLabel>
-          </StatCard>
-          <StatCard $accent="#1b6f5c">
-            <StatNum>{statsClassified}</StatNum>
-            <StatLabel>Classificati AI</StatLabel>
-          </StatCard>
-          {statsPending > 0 && (
-            <StatCard $accent="#d97706">
-              <StatNum>{statsPending}</StatNum>
-              <StatLabel>In attesa</StatLabel>
-            </StatCard>
-          )}
-          <StatCard $accent="#6b7280">
-            <StatNum>{statsLow}</StatNum>
-            <StatLabel>Non classificati</StatLabel>
-          </StatCard>
-          {statsManual > 0 && (
-            <StatCard $accent="#8b5cf6">
-              <StatNum>{statsManual}</StatNum>
-              <StatLabel>Manuale</StatLabel>
-            </StatCard>
-          )}
-        </StatsRow>
+            <WorkspacePreviewCard text="Area scura per contenuti, preview o immagine di rilievo." />
+
+            {status === "loading" && (
+              <AnalyzingBanner>
+                <AnalyzingSpinner />
+                Analisi AI in corso — Classificazione gerarchica a 3 livelli...
+              </AnalyzingBanner>
+            )}
+          </RightRail>
+        </WorkspaceGrid>
       </PageWrapper>
     </>
   );
@@ -235,15 +258,15 @@ const PageWrapper = styled.div`
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 8px 0;
+  padding: 8px 0 24px;
 `;
 
-const Grid = styled.div`
+const WorkspaceGrid = styled.div`
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(240px, 280px);
   gap: 12px;
 
-  @media (max-width: 980px) {
+  @media (max-width: 1180px) {
     grid-template-columns: 1fr;
   }
 `;
@@ -254,11 +277,33 @@ const LeftCol = styled.div`
   gap: 12px;
 `;
 
-const RightCol = styled.div`min-width: 0;`;
+const CenterCol = styled.div`min-width: 0;`;
+
+const RightRail = styled.div`
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+`;
+
+const RailCard = styled.section`
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #dbe4e0;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+`;
+
+const RailTitle = styled.h3`
+  margin: 0 0 12px;
+  color: #0f172a;
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+`;
 
 const StatsRow = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   gap: 10px;
 `;
 
@@ -272,10 +317,14 @@ const StatNum = styled.div`font-size: 1.5rem; font-weight: 800; color: #1a3a30;`
 const StatLabel = styled.div`font-size: 0.72rem; color: #888; margin-top: 2px;`;
 
 const AnalyzingBanner = styled.div`
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 4px; padding: 12px 16px;
-  background: linear-gradient(90deg, #f0faf5, #f5f3ff);
-  border: 1px solid #d4ece5; border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px 16px;
+  background: linear-gradient(90deg, #eff6ff, #f8fafc);
+  border: 1px solid #d4dcec;
+  border-radius: 12px;
   font-size: 0.88rem; font-weight: 600; color: #1b6f5c;
 `;
 

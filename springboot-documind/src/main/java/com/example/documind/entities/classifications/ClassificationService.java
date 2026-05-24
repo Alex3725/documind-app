@@ -120,6 +120,7 @@ public class ClassificationService {
 
         // Processa il risultato gerarchico
         AnalysisResult result = processHierarchicalResult(pythonResult, authToken, file);
+        result = applyFolderMatching(owner, result, pythonResult);
 
         // Salva file bytes su disco e persisti metadati nel DB (owner = authenticated owner o IP)
         // Gestione robusto degli errori con logging
@@ -398,6 +399,237 @@ public class ClassificationService {
                         (a, b) -> a
                 ));
     }
+
+                private AnalysisResult applyFolderMatching(String owner, AnalysisResult result, PythonHierarchicalResponse pythonResult) {
+                    if (!StringUtils.hasText(owner) || result == null) {
+                        return result;
+                    }
+
+                    List<com.example.documind.entities.folders.FolderType> folders = folderTypeRepository.findAllByOwnerOrderByFullPathAsc(owner)
+                            .stream()
+                            .filter(folder -> !folder.isSystem())
+                            .collect(Collectors.toList());
+
+                    if (folders.isEmpty()) {
+                        return result;
+                    }
+
+                    String documentText = normalizeForMatch(buildDocumentMatchText(result, pythonResult));
+                    if (!StringUtils.hasText(documentText)) {
+                        return result;
+                    }
+
+                    com.example.documind.entities.folders.FolderType bestFolder = null;
+                    double bestScore = 0.0;
+
+                    for (com.example.documind.entities.folders.FolderType folder : folders) {
+                        double score = scoreFolderMatch(folder, documentText, result);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestFolder = folder;
+                        }
+                    }
+
+                    if (bestFolder == null || bestScore < 3.0) {
+                        return result;
+                    }
+
+                    String suggestedFolder = bestFolder.getFullPath();
+                    result.setSuggestedFolder(suggestedFolder);
+
+                    String primaryTag = resolvePrimaryFolderTag(bestFolder);
+                    if (StringUtils.hasText(primaryTag)) {
+                        mergeFolderTag(result, bestFolder, primaryTag);
+                    }
+
+                    if (StringUtils.hasText(result.getMessage())) {
+                        result.setMessage(result.getMessage() + " Cartella suggerita: " + suggestedFolder + ".");
+                    }
+
+                    return result;
+                }
+
+                private String buildDocumentMatchText(AnalysisResult result, PythonHierarchicalResponse pythonResult) {
+                    StringBuilder builder = new StringBuilder();
+
+                    if (result != null) {
+                        appendIfPresent(builder, result.getFilename());
+                        appendIfPresent(builder, result.getSummary());
+                        appendIfPresent(builder, result.getSuggestedFolder());
+                        if (result.getAssignedTags() != null) {
+                            result.getAssignedTags().forEach(tag -> appendIfPresent(builder, tag));
+                        }
+                        if (result.getTags() != null) {
+                            result.getTags().forEach(tag -> {
+                                if (tag != null) {
+                                    appendIfPresent(builder, tag.getName());
+                                    appendIfPresent(builder, tag.getDescription());
+                                    appendIfPresent(builder, tag.getCategory());
+                                }
+                            });
+                        }
+                        if (result.getExtractedData() != null) {
+                            flattenObject(result.getExtractedData(), builder);
+                        }
+                    }
+
+                    if (pythonResult != null) {
+                        appendIfPresent(builder, pythonResult.getSummary());
+                        appendIfPresent(builder, pythonResult.getFilename());
+                        if (pythonResult.getPrimaryTags() != null) {
+                            pythonResult.getPrimaryTags().forEach(tag -> appendIfPresent(builder, tag));
+                        }
+                        if (pythonResult.getTags() != null) {
+                            pythonResult.getTags().forEach(tag -> {
+                                if (tag != null) {
+                                    appendIfPresent(builder, tag.getName());
+                                    appendIfPresent(builder, tag.getDescription());
+                                    appendIfPresent(builder, tag.getCategory());
+                                }
+                            });
+                        }
+                        if (pythonResult.getExtractedData() != null) {
+                            flattenObject(pythonResult.getExtractedData(), builder);
+                        }
+                    }
+
+                    return builder.toString();
+                }
+
+                private double scoreFolderMatch(com.example.documind.entities.folders.FolderType folder, String documentText, AnalysisResult result) {
+                    double score = 0.0;
+
+                    String fullPath = normalizeForMatch(folder.getFullPath());
+                    String name = normalizeForMatch(folder.getName());
+                    String description = normalizeForMatch(folder.getDescription());
+                    String rules = normalizeForMatch(folder.getSemanticRules());
+
+                    if (StringUtils.hasText(fullPath) && documentText.contains(fullPath)) {
+                        score += 5.5;
+                    }
+                    if (StringUtils.hasText(name) && documentText.contains(name)) {
+                        score += 4.0;
+                    }
+
+                    score += tokenOverlapScore(documentText, fullPath, 1.25);
+                    score += tokenOverlapScore(documentText, name, 1.75);
+                    score += tokenOverlapScore(documentText, description, 0.5);
+                    score += tokenOverlapScore(documentText, rules, 0.6);
+
+                    if (folder.getAutoTags() != null) {
+                        for (String tag : folder.getAutoTags()) {
+                            String normalizedTag = normalizeForMatch(tag);
+                            if (StringUtils.hasText(normalizedTag) && documentText.contains(normalizedTag)) {
+                                score += 4.25;
+                            }
+                        }
+                    }
+
+                    if (result != null && result.getAssignedTags() != null && folder.getAutoTags() != null) {
+                        Set<String> assigned = result.getAssignedTags().stream()
+                                .filter(StringUtils::hasText)
+                                .map(this::normalizeForMatch)
+                                .collect(Collectors.toSet());
+                        for (String tag : folder.getAutoTags()) {
+                            if (assigned.contains(normalizeForMatch(tag))) {
+                                score += 3.0;
+                            }
+                        }
+                    }
+
+                    return score;
+                }
+
+                private void mergeFolderTag(AnalysisResult result, com.example.documind.entities.folders.FolderType folder, String primaryTag) {
+                    List<TagEntry> tags = new ArrayList<>(Optional.ofNullable(result.getTags()).orElse(List.of()));
+                    List<String> assignedTags = new ArrayList<>(Optional.ofNullable(result.getAssignedTags()).orElse(List.of()));
+
+                    boolean alreadyPresent = assignedTags.stream()
+                            .filter(StringUtils::hasText)
+                            .map(this::normalizeForMatch)
+                            .anyMatch(tag -> tag.equals(normalizeForMatch(primaryTag)));
+
+                    if (!alreadyPresent) {
+                        TagEntry folderTag = new TagEntry();
+                        folderTag.setName(primaryTag);
+                        folderTag.setConfidence(1.0);
+                        folderTag.setCategory("folder");
+                        folderTag.setDescription(folder.getDescription());
+                        folderTag.setIsDefault(false);
+                        tags.add(0, folderTag);
+                        assignedTags.add(0, primaryTag);
+                    }
+
+                    result.setTags(tags);
+                    result.setAssignedTags(assignedTags);
+                }
+
+                private String resolvePrimaryFolderTag(com.example.documind.entities.folders.FolderType folder) {
+                    if (folder == null) {
+                        return null;
+                    }
+                    if (folder.getAutoTags() != null) {
+                        for (String tag : folder.getAutoTags()) {
+                            if (StringUtils.hasText(tag)) {
+                                return tag.trim();
+                            }
+                        }
+                    }
+                    return StringUtils.hasText(folder.getName()) ? folder.getName().trim() : null;
+                }
+
+                private String normalizeForMatch(String input) {
+                    if (!StringUtils.hasText(input)) {
+                        return "";
+                    }
+                    return input.toLowerCase(Locale.ROOT)
+                            .replaceAll("[^a-z0-9à-öø-ÿ]+", " ")
+                            .trim();
+                }
+
+                private double tokenOverlapScore(String documentText, String candidate, double weight) {
+                    if (!StringUtils.hasText(candidate)) {
+                        return 0.0;
+                    }
+
+                    double score = 0.0;
+                    for (String token : candidate.split("\\s+")) {
+                        if (token.length() < 4) {
+                            continue;
+                        }
+                        if (documentText.contains(token)) {
+                            score += weight;
+                        }
+                    }
+                    return score;
+                }
+
+                private void appendIfPresent(StringBuilder builder, String value) {
+                    if (StringUtils.hasText(value)) {
+                        builder.append(' ').append(value).append(' ');
+                    }
+                }
+
+                private void flattenObject(Object value, StringBuilder builder) {
+                    if (value == null) {
+                        return;
+                    }
+                    if (value instanceof Map<?, ?> map) {
+                        for (Map.Entry<?, ?> entry : map.entrySet()) {
+                            appendIfPresent(builder, entry.getKey() != null ? String.valueOf(entry.getKey()) : null);
+                            flattenObject(entry.getValue(), builder);
+                        }
+                        return;
+                    }
+                    if (value instanceof Collection<?> collection) {
+                        for (Object item : collection) {
+                            flattenObject(item, builder);
+                        }
+                        return;
+                    }
+                    appendIfPresent(builder, String.valueOf(value));
+                }
+
 
     private String mergeCustomTags(String frontendTags, String userTypes) throws IOException {
         if (!StringUtils.hasText(frontendTags) && !StringUtils.hasText(userTypes)) return null;

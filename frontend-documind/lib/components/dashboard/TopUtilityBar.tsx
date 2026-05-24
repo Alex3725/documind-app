@@ -12,8 +12,13 @@ export default function TopUtilityBar({ userName, onLogout, onOpenTutorial }: Pr
   return (
     <Bar>
       <Left>
-        <Title>DocuMind Dashboard</Title>
-        <Subtitle>Funzioni account e sessione</Subtitle>
+        <BrandMark>
+          <BrandIcon>DM</BrandIcon>
+          <BrandText>
+            <BrandName>DocuMind</BrandName>
+            <BrandSubtitle>workspace</BrandSubtitle>
+          </BrandText>
+        </BrandMark>
       </Left>
 
       <Right>
@@ -29,9 +34,9 @@ export default function TopUtilityBar({ userName, onLogout, onOpenTutorial }: Pr
 }
 
 const Bar = styled.div`
-  background: #facc15;
-  border: 1px solid #eab308;
-  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #dbe4e0;
+  border-radius: 16px;
   padding: 12px 16px;
   display: flex;
   align-items: center;
@@ -40,9 +45,34 @@ const Bar = styled.div`
   min-height: 72px;
 `;
 
-const Left = styled.div`display:flex;flex-direction:column;gap:2px;`;
-const Title = styled.div`font-weight:800;color:#453200;font-size:1rem;`;
-const Subtitle = styled.div`color:#5d4700;font-size:0.82rem;`;
+const Left = styled.div`display:flex;align-items:center;gap:12px;`;
+
+const BrandMark = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+`;
+
+const BrandIcon = styled.div`
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #eef2ff, #c7d2fe);
+  color: #1f2937;
+  font-weight: 900;
+  font-size: 0.72rem;
+`;
+
+const BrandText = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const BrandName = styled.div`font-weight:800;color:#0f172a;font-size:0.98rem;`;
+const BrandSubtitle = styled.div`color:#64748b;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.08em;`;
 
 const Right = styled.div`display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;`;
 
@@ -52,8 +82,8 @@ const UserChip = styled.div`
   gap: 8px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid #fef08a;
-  background: #fef9c3;
+  border: 1px solid #dbe4e0;
+  background: #fff;
 `;
 
 const Avatar = styled.div`
@@ -65,15 +95,15 @@ const Avatar = styled.div`
   font-size: 0.76rem;
   font-weight: 800;
   color: #fff;
-  background: #1f2937;
+  background: #0f172a;
 `;
 
-const UserName = styled.div`font-size:0.82rem;color:#453200;font-weight:700;`;
+const UserName = styled.div`font-size:0.82rem;color:#0f172a;font-weight:700;`;
 
 const ActionBtn = styled.button`
-  border: 1px solid #fde047;
-  background: #fff7ae;
-  color: #594500;
+  border: 1px solid #dbe4e0;
+  background: #ffffff;
+  color: #334155;
   padding: 7px 12px;
   border-radius: 10px;
   font-weight: 700;
@@ -82,7 +112,7 @@ const ActionBtn = styled.button`
 `;
 
 const LogoutBtn = styled(ActionBtn)`
-  border-color: #fca5a5;
-  background: #fee2e2;
+  border-color: #fecaca;
+  background: #fff5f5;
   color: #991b1b;
 `;

@@ -40,11 +40,11 @@ export default function MemoryCircleCard({ totalGb, usedGb, fileCount }: Props) 
 }
 
 const Card = styled.section`
-  background: #16a34a;
-  border: 1px solid #15803d;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #dbe4e0;
   border-radius: 16px;
   padding: 14px;
-  color: #ecfdf5;
+  color: #0f172a;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -60,23 +60,24 @@ const Circle = styled.div<{ $percent: number }>`
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: conic-gradient(#dcfce7 ${({ $percent }) => $percent}%, rgba(255,255,255,0.18) 0%);
+  background: conic-gradient(#1f2937 ${({ $percent }) => $percent}%, #e2e8f0 0%);
 `;
 
 const CircleInner = styled.div`
   width: 110px;
   height: 110px;
   border-radius: 50%;
-  background: #0f7a35;
+  background: #ffffff;
   display: grid;
   place-items: center;
   text-align: center;
+  border: 1px solid #dbe4e0;
 `;
 
 const Percent = styled.div`font-size:1.35rem;font-weight:900;line-height:1;`;
-const Meta = styled.div`font-size:0.76rem;opacity:0.9;`;
+const Meta = styled.div`font-size:0.76rem;color:#64748b;`;
 
 const Stats = styled.div`display:grid;grid-template-columns:1fr;gap:8px;`;
-const Stat = styled.div`display:flex;justify-content:space-between;background:rgba(255,255,255,0.12);border-radius:10px;padding:8px 10px;`;
-const Label = styled.div`font-size:0.76rem;opacity:0.95;`;
+const Stat = styled.div`display:flex;justify-content:space-between;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;`;
+const Label = styled.div`font-size:0.76rem;color:#64748b;`;
 const Value = styled.div`font-size:0.8rem;font-weight:800;`;

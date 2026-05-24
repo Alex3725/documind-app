@@ -31,6 +31,8 @@ type FormState = {
   semanticRules: string;
   icon: string;
   color: string;
+  useFolderNameAsTag: boolean;
+  customTagName: string;
   autoTags: string;
 };
 
@@ -42,6 +44,8 @@ const emptyForm: FormState = {
   semanticRules: "",
   icon: "📁",
   color: "#1b6f5c",
+  useFolderNameAsTag: true,
+  customTagName: "",
   autoTags: "",
 };
 
@@ -68,10 +72,16 @@ export default function TypeManagementPage() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      const autoTags = form.autoTags
+      const secondaryAutoTags = form.autoTags
         .split(",")
         .map((t) => t.trim().toLowerCase())
         .filter(Boolean);
+
+      const primaryTag = form.useFolderNameAsTag
+        ? form.name.trim().toLowerCase()
+        : form.customTagName.trim().toLowerCase() || form.name.trim().toLowerCase();
+
+      const autoTags = Array.from(new Set([primaryTag, ...secondaryAutoTags].filter(Boolean)));
 
       const fullPath = form.fullPath.trim() || (
         form.parentPath ? `${form.parentPath}/${form.name.trim()}` : form.name.trim()
@@ -91,7 +101,7 @@ export default function TypeManagementPage() {
             icon: form.icon,
             color: form.color,
             autoTags,
-            autoUpdateType: true,
+            autoUpdateType: form.useFolderNameAsTag,
           }),
         });
 
@@ -111,7 +121,7 @@ export default function TypeManagementPage() {
           icon: form.icon,
           color: form.color,
           autoTags,
-          autoUpdateType: true,
+          autoUpdateType: form.useFolderNameAsTag,
         })).unwrap();
       }
 
@@ -158,6 +168,8 @@ export default function TypeManagementPage() {
       semanticRules: folder.semanticRules ?? "",
       icon: folder.icon,
       color: folder.color,
+      useFolderNameAsTag: folder.autoUpdateType,
+      customTagName: folder.autoUpdateType ? "" : (folder.autoTags?.[0] ?? folder.name),
       autoTags: (folder.autoTags ?? []).join(", "),
     });
     setShowForm(true);
@@ -289,7 +301,31 @@ export default function TypeManagementPage() {
                 value={form.autoTags}
                 onChange={(e) => setForm((f) => ({ ...f, autoTags: e.target.value }))}
               />
-              <HintText>Assegnati automaticamente quando un file viene spostato qui.</HintText>
+              <HintText>Tag secondari assegnati automaticamente quando un file viene spostato qui.</HintText>
+            </FormGroup>
+
+            <FormGroup>
+              <FormLabel>Comportamento tag primario</FormLabel>
+              <SwitchRow>
+                <SwitchLabel>
+                  <SwitchInput
+                    type="checkbox"
+                    checked={form.useFolderNameAsTag}
+                    onChange={(e) => setForm((f) => ({ ...f, useFolderNameAsTag: e.target.checked }))}
+                  />
+                  <span>Usa nome cartella come tag</span>
+                </SwitchLabel>
+              </SwitchRow>
+              {!form.useFolderNameAsTag && (
+                <FormInput
+                  placeholder="Nome tag personalizzato"
+                  value={form.customTagName}
+                  onChange={(e) => setForm((f) => ({ ...f, customTagName: e.target.value }))}
+                />
+              )}
+              <HintText>
+                Se disattivato, il tag primario sarà quello personalizzato e la descrizione semantica guiderà l&apos;assegnazione.
+              </HintText>
             </FormGroup>
 
             <FormGroup>
@@ -522,6 +558,9 @@ const FormLabel = styled.label`display: block; font-size: 0.8rem; font-weight: 7
 const FormInput = styled.input`width: 100%; border: 1px solid #ccc; border-radius: 10px; padding: 9px 12px; font-size: 0.9rem; outline: none; &:focus{border-color:#1b6f5c;box-shadow:0 0 0 3px rgba(27,111,92,0.1);}`;
 const FormSelect = styled.select`width: 100%; border: 1px solid #ccc; border-radius: 10px; padding: 9px 12px; font-size: 0.9rem; outline: none; background: #fff; &:focus{border-color:#1b6f5c;}`;
 const FormTextarea = styled.textarea`width: 100%; border: 1px solid #ccc; border-radius: 10px; padding: 9px 12px; font-size: 0.88rem; outline: none; resize: vertical; font-family: inherit; &:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,0.1);}`;
+const SwitchRow = styled.div`display:flex;align-items:center;gap:10px;`;
+const SwitchLabel = styled.label`display:flex;align-items:center;gap:10px;font-size:0.86rem;color:#334155;font-weight:600;`;
+const SwitchInput = styled.input`width:16px;height:16px;accent-color:#1b6f5c;`;
 
 const IconColorRow = styled.div`display: flex; gap: 12px; flex-direction: column;`;
 const IconGrid = styled.div`display: flex; flex-wrap: wrap; gap: 6px;`;

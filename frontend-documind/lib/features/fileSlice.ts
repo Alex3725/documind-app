@@ -12,6 +12,20 @@ export type TagEntry = {
   isDefault?: boolean;
 };
 
+/** Punteggi di un livello di classificazione gerarchica */
+export type ClassificationLevel = {
+  scores: Record<string, number>;
+  top: string | null;
+  reasoning?: string;
+};
+
+/** Classificazione gerarchica completa a 3 livelli */
+export type HierarchicalClassification = {
+  step1_context: ClassificationLevel;
+  step2_content_type: ClassificationLevel;
+  step3_sub_type: ClassificationLevel;
+};
+
 export type AnalysisResult = {
   type: "CLASSIFIED" | "PARTIAL_CONFIRMATION" | "CONFIRMATION_REQUIRED" | "LOW_CONFIDENCE";
   file_id: string;
@@ -20,10 +34,12 @@ export type AnalysisResult = {
   tags: TagEntry[];
   /** Nomi dei tag assegnati */
   assigned_tags: string[];
-  /** Tag in attesa di conferma (0.45–0.75) */
+  /** Tag in attesa di conferma */
   pending_tags?: TagEntry[];
-  /** Tutti i tag con score > 0.20 (per popup) */
+  /** Tutti i tag con score > 0.20 */
   all_tags?: TagEntry[];
+  /** Classificazione gerarchica a 3 livelli */
+  hierarchical_classification?: HierarchicalClassification;
   summary?: string;
   message: string;
   extracted_data?: Record<string, unknown>;
@@ -39,19 +55,37 @@ export type FileItem = {
   confirmedTags?: string[];
   tags: string[];
   folder: string;
+  /** Se l'utente ha sovrascritto manualmente la classificazione AI */
+  userOverride?: boolean;
+  /** Tipo sovrascritto dall'utente */
+  overrideFolder?: string;
 };
 
-// Upload senza analisi
-export type ManualUploadPayload = {
-  filename: string;
-  tags: string[];
-  folder: string;
+/** Cartella semantica */
+export type FolderType = {
+  id: number;
+  name: string;
+  fullPath: string;
+  parentPath?: string;
+  description?: string;
+  semanticRules?: string;
+  icon: string;
+  color: string;
+  autoTags?: string[];
+  autoUpdateType: boolean;
+  system: boolean;
+  fileCount: number;
+  depth: number;
+  createdAt?: string;
 };
 
 type FileState = {
   files: FileItem[];
   pendingAnalysis: AnalysisResult | null;
+  folders: FolderType[];
+  foldersLoaded: boolean;
   status: "idle" | "loading" | "succeeded" | "failed";
+  foldersStatus: "idle" | "loading" | "succeeded" | "failed";
   error: string | null;
   errorCode: string | null;
 };
@@ -59,7 +93,10 @@ type FileState = {
 const initialState: FileState = {
   files: [],
   pendingAnalysis: null,
+  folders: [],
+  foldersLoaded: false,
   status: "idle",
+  foldersStatus: "idle",
   error: null,
   errorCode: null,
 };
@@ -68,20 +105,15 @@ const initialState: FileState = {
 // ERROR PARSING
 // ============================================================
 
-type ApiError = {
-  message?: string;
-  error?: string;
-  code?: string;
-  details?: unknown;
-};
+type ApiError = { message?: string; error?: string; code?: string };
 
-function extractErrorMessage(payload: unknown, fallback: string): string {
+function extractMsg(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
   const obj = payload as ApiError;
   return obj.message?.trim() || obj.error?.trim() || fallback;
 }
 
-function extractErrorCode(payload: unknown): string | null {
+function extractCode(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
   return (payload as ApiError).code ?? null;
 }
@@ -92,12 +124,12 @@ function extractErrorCode(payload: unknown): string | null {
 
 export const uploadAndAnalyze = createAsyncThunk<
   AnalysisResult,
-  { file: File; customTags?: Array<{ name: string; description: string; category?: string }> },
+  { file: File; customTags?: Record<string, string> },
   { rejectValue: { message: string; code: string | null } }
 >("files/uploadAndAnalyze", async ({ file, customTags }, thunkApi) => {
   const formData = new FormData();
   formData.append("file", file);
-  if (customTags && customTags.length > 0) {
+  if (customTags && Object.keys(customTags).length > 0) {
     formData.append("custom_tags_for_analysis", JSON.stringify(customTags));
   }
 
@@ -109,22 +141,16 @@ export const uploadAndAnalyze = createAsyncThunk<
 
   const text = await response.text();
   let data: unknown = null;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    return thunkApi.rejectWithValue({
-      message: text.trim() || "Risposta non valida dal server.",
-      code: "PARSE_ERROR",
-    });
+  try { data = JSON.parse(text); } catch {
+    return thunkApi.rejectWithValue({ message: text.trim() || "Risposta non valida.", code: "PARSE_ERROR" });
   }
 
   if (!response.ok) {
     return thunkApi.rejectWithValue({
-      message: extractErrorMessage(data, "Errore durante l'analisi del file."),
-      code: extractErrorCode(data),
+      message: extractMsg(data, "Errore durante l'analisi del file."),
+      code: extractCode(data),
     });
   }
-
   return data as AnalysisResult;
 });
 
@@ -143,15 +169,64 @@ export const confirmClassification = createAsyncThunk<
       additional_tags: payload.additionalTags ?? [],
     }),
   });
-
   const data = (await response.json()) as unknown;
   if (!response.ok) {
     return thunkApi.rejectWithValue({
-      message: extractErrorMessage(data, "Errore durante la conferma."),
-      code: extractErrorCode(data),
+      message: extractMsg(data, "Errore durante la conferma."),
+      code: extractCode(data),
     });
   }
   return data as AnalysisResult;
+});
+
+export const loadFolders = createAsyncThunk<
+  FolderType[],
+  void,
+  { rejectValue: string }
+>("files/loadFolders", async (_, thunkApi) => {
+  const response = await fetch("/api/folders", {
+    credentials: "include",
+  });
+  if (!response.ok) return thunkApi.rejectWithValue("Errore caricamento cartelle.");
+  return (await response.json()) as FolderType[];
+});
+
+export const createFolder = createAsyncThunk<
+  FolderType,
+  {
+    name: string;
+    fullPath?: string;
+    parentPath?: string;
+    description: string;
+    semanticRules?: string;
+    icon?: string;
+    color?: string;
+    autoTags?: string[];
+    autoUpdateType?: boolean;
+  },
+  { rejectValue: string }
+>("files/createFolder", async (data, thunkApi) => {
+  const response = await fetch("/api/folders", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) return thunkApi.rejectWithValue("Errore creazione cartella.");
+  return (await response.json()) as FolderType;
+});
+
+export const seedFolderProfile = createAsyncThunk<
+  FolderType[],
+  string,
+  { rejectValue: string }
+>("files/seedProfile", async (profileName, thunkApi) => {
+  const response = await fetch(`/api/folders/seed/${profileName}`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) return thunkApi.rejectWithValue("Errore seeding profilo.");
+  return (await response.json()) as FolderType[];
 });
 
 // ============================================================
@@ -165,43 +240,87 @@ const fileSlice = createSlice({
     clearPendingAnalysis(state) {
       state.pendingAnalysis = null;
     },
-    addManualFile(state, action: PayloadAction<ManualUploadPayload>) {
-      const { filename, tags, folder } = action.payload;
-      const fileItem: FileItem = {
-        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        filename,
-        uploadedAt: new Date().toISOString(),
-        analysisResult: {
-          type: "CLASSIFIED",
-          file_id: "",
-          filename,
-          tags: tags.map((name) => ({ name, confidence: 1.0, category: "manual" })),
-          assigned_tags: tags,
-          message: "File salvato manualmente.",
-          suggested_folder: folder,
-        },
-        tags,
-        folder,
-      };
-      state.files.unshift(fileItem);
-    },
     removeFile(state, action: PayloadAction<string>) {
       state.files = state.files.filter((f) => f.id !== action.payload);
     },
-    updateFileTags(
-      state,
-      action: PayloadAction<{ fileId: string; tags: string[]; folder?: string }>
-    ) {
+    updateFileTags(state, action: PayloadAction<{ fileId: string; tags: string[]; folder?: string }>) {
       const { fileId, tags, folder } = action.payload;
       const file = state.files.find((f) => f.id === fileId);
       if (file) {
         file.tags = tags;
         if (folder) file.folder = folder;
+        file.userOverride = true;
+        file.overrideFolder = folder;
+      }
+    },
+    /** Sovrascrive manualmente la cartella/tipo di un file */
+    overrideFileFolder(state, action: PayloadAction<{ fileId: string; folder: string; tags?: string[] }>) {
+      const { fileId, folder, tags } = action.payload;
+      const file = state.files.find((f) => f.id === fileId);
+      if (file) {
+        file.folder = folder;
+        file.userOverride = true;
+        file.overrideFolder = folder;
+        if (tags) file.tags = tags;
+      }
+    },
+    /** Quando un file viene spostato in una cartella, aggiorna tipo automaticamente */
+    moveFileToFolder(state, action: PayloadAction<{ fileId: string; targetFolder: FolderType }>) {
+      const { fileId, targetFolder } = action.payload;
+      const file = state.files.find((f) => f.id === fileId);
+      if (file) {
+        file.folder = targetFolder.fullPath;
+        file.userOverride = true;
+        file.overrideFolder = targetFolder.fullPath;
+        // Aggiunge auto-tag della cartella
+        if (targetFolder.autoTags && targetFolder.autoUpdateType) {
+          const currentTags = new Set(file.tags);
+          targetFolder.autoTags.forEach((t) => currentTags.add(t));
+          file.tags = Array.from(currentTags);
+        }
       }
     },
     clearError(state) {
       state.error = null;
       state.errorCode = null;
+    },
+    updateFolder(state, action: PayloadAction<FolderType>) {
+      const idx = state.folders.findIndex((f) => f.id === action.payload.id);
+      if (idx >= 0) state.folders[idx] = action.payload;
+    },
+    removeFolder(state, action: PayloadAction<number>) {
+      state.folders = state.folders.filter((f) => f.id !== action.payload);
+    },
+    addFileWithoutAnalysis(
+      state,
+      action: PayloadAction<{ filename: string; folder?: string; tags?: string[] }>
+    ) {
+      const filename = action.payload.filename.trim();
+      if (!filename) return;
+
+      const fallbackFolder = action.payload.folder?.trim() || "Non classificati";
+      const tags = action.payload.tags ?? [];
+
+      const manualResult: AnalysisResult = {
+        type: "LOW_CONFIDENCE",
+        file_id: `manual-${Date.now()}`,
+        filename,
+        tags: tags.map((name) => ({ name, confidence: 1 })),
+        assigned_tags: tags,
+        message: "Caricato senza analisi AI.",
+        suggested_folder: fallbackFolder,
+      };
+
+      state.files.unshift({
+        id: manualResult.file_id,
+        filename,
+        uploadedAt: new Date().toISOString(),
+        analysisResult: manualResult,
+        tags,
+        folder: fallbackFolder,
+        userOverride: true,
+        overrideFolder: fallbackFolder,
+      });
     },
   },
   extraReducers: (builder) => {
@@ -217,10 +336,7 @@ const fileSlice = createSlice({
         state.status = "succeeded";
         const result = action.payload;
 
-        if (
-          result.type === "CONFIRMATION_REQUIRED" ||
-          result.type === "PARTIAL_CONFIRMATION"
-        ) {
+        if (result.type === "CONFIRMATION_REQUIRED" || result.type === "PARTIAL_CONFIRMATION") {
           state.pendingAnalysis = result;
         } else {
           const fileItem: FileItem = {
@@ -229,7 +345,7 @@ const fileSlice = createSlice({
             uploadedAt: new Date().toISOString(),
             analysisResult: result,
             tags: result.assigned_tags ?? [],
-            folder: result.suggested_folder ?? "Altro",
+            folder: result.suggested_folder ?? "Non classificati",
           };
           state.files.unshift(fileItem);
         }
@@ -244,7 +360,6 @@ const fileSlice = createSlice({
       .addCase(confirmClassification.fulfilled, (state, action) => {
         const result = action.payload;
         state.pendingAnalysis = null;
-
         const fileItem: FileItem = {
           id: result.file_id || `${Date.now()}`,
           filename: result.filename,
@@ -252,23 +367,47 @@ const fileSlice = createSlice({
           analysisResult: result,
           confirmedTags: result.assigned_tags,
           tags: result.assigned_tags ?? [],
-          folder: result.suggested_folder ?? "Altro",
+          folder: result.suggested_folder ?? "Non classificati",
         };
         state.files.unshift(fileItem);
       })
       .addCase(confirmClassification.rejected, (state, action) => {
         state.error = action.payload?.message ?? "Errore durante la conferma.";
         state.errorCode = action.payload?.code ?? null;
+      })
+
+      // FOLDERS
+      .addCase(loadFolders.pending, (state) => { state.foldersStatus = "loading"; })
+      .addCase(loadFolders.fulfilled, (state, action) => {
+        state.folders = action.payload;
+        state.foldersLoaded = true;
+        state.foldersStatus = "succeeded";
+      })
+      .addCase(loadFolders.rejected, (state) => { state.foldersStatus = "failed"; })
+      .addCase(createFolder.fulfilled, (state, action) => {
+        state.folders.push(action.payload);
+        state.folders.sort((a, b) => a.fullPath.localeCompare(b.fullPath));
+      })
+      .addCase(seedFolderProfile.fulfilled, (state, action) => {
+        const newFolders = action.payload;
+        const existingIds = new Set(state.folders.map((f) => f.id));
+        const toAdd = newFolders.filter((f) => !existingIds.has(f.id));
+        state.folders = [...state.folders, ...toAdd].sort((a, b) => a.fullPath.localeCompare(b.fullPath));
+        state.foldersLoaded = true;
       });
   },
 });
 
 export const {
   clearPendingAnalysis,
-  addManualFile,
   removeFile,
   updateFileTags,
+  overrideFileFolder,
+  moveFileToFolder,
   clearError,
+  updateFolder,
+  removeFolder,
+  addFileWithoutAnalysis,
 } = fileSlice.actions;
 
 export default fileSlice.reducer;

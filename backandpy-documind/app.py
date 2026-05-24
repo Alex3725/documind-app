@@ -29,40 +29,83 @@ OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", 300))
 
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".md", ".csv", ".html"}
 
-TAG_NAME_ALIASES = {
-    "contraetto": "contratto",
-    "contratti": "contratto",
-    "cv": "curriculum",
-    "documento identita": "documento_identita",
-    "documento di identita": "documento_identita",
-    "id document": "documento_identita",
-    "source code": "codice_sorgente",
-    "code": "codice_sorgente",
-    "spreadsheet": "foglio_calcolo",
-    "payslip": "busta_paga",
-    "medical report": "documento_medico",
-    "medical prescription": "ricetta_medica",
+# =====================================================
+# DEFINIZIONI GERARCHIA AI (3 LIVELLI)
+# =====================================================
+
+# Livello 1: Contesto
+CONTEXTS = {
+    "work": "Documenti di lavoro, professionali, aziendali: contratti, fatture, report, email di lavoro, presentazioni aziendali, codice sorgente, documentazione tecnica",
+    "personal": "Documenti personali: carta d'identità, passaporto, ricevute personali, fotografie, note personali, messaggi privati",
+    "study": "Documenti di studio o formazione: appunti, dispense, libri di testo, esercizi, relazioni scolastiche, tutorial",
+    "leisure": "Contenuto di intrattenimento o tempo libero: libri, racconti, poesie, testi di canzoni, contenuti di giochi",
 }
 
-KEYWORD_FALLBACK_RULES = {
-    "fattura": ["fattura", "invoice", "partita iva", "imponibile", "totale", "iva"],
-    "ricevuta": ["ricevuta", "scontrino", "pagamento ricevuto", "importo pagato"],
-    "contratto": ["contratto", "accordo", "clausola", "firmato", "parti"],
-    "curriculum": ["curriculum", "cv", "esperienza", "competenze", "formazione"],
-    "documento_identita": ["carta d'identita", "passaporto", "patente", "codice fiscale"],
-    "documento_legale": ["tribunale", "sentenza", "ordinanza", "atto notarile"],
-    "poesia": ["poesia", "verso", "strofa", "rima"],
-    "narrativa": ["romanzo", "racconto", "capitolo", "personaggio"],
-    "codice_sorgente": ["class ", "function", "import ", "public static", "def "],
-    "foglio_calcolo": ["csv", "colonna", "riga", "foglio", "tabella"],
-    "presentazione": ["slide", "presentazione", "agenda", "speaker notes"],
-    "relazione": ["relazione", "report", "analisi", "conclusioni"],
-    "email": ["oggetto:", "mittente:", "destinatario:", "inviato:"],
-    "documento_medico": ["referto", "diagnosi", "paziente", "esame"],
-    "documento_tecnico": ["specifiche", "architettura", "api", "manuale"],
-    "verbale": ["verbale", "riunione", "ordine del giorno", "presenti"],
-    "busta_paga": ["busta paga", "retribuzione", "cedolino", "stipendio"],
-    "ricetta_medica": ["ricetta", "prescrizione", "farmaco", "dosaggio"],
+# Livello 2: Tipo di contenuto
+CONTENT_TYPES = {
+    "code": "Codice sorgente o script: Python, Java, JavaScript, HTML, CSS, shell script, file di configurazione, Makefile",
+    "document": "Documento formale: fattura, contratto, ricevuta, relazione, verbale, atto, certificato, modulo",
+    "notes": "Appunti, note, bozze, lista di cose da fare, memo, testo informale non strutturato",
+    "media_metadata": "Descrizione o metadati di media: tracklist, crediti, descrizione di immagini, scheda tecnica video",
+    "data": "Dati strutturati: CSV, tabelle, fogli di calcolo, database, dati JSON o XML",
+    "communication": "Comunicazione scritta: email, lettera formale, messaggio, chat log",
+    "literature": "Opera letteraria o creativa: romanzo, poesia, racconto, dramma, saggio creativo",
+    "tutorial": "Guida o manuale: how-to, manuale d'uso, documentazione utente, FAQ",
+}
+
+# Livello 3: Sotto-tipo
+SUB_TYPES = {
+    # code
+    "java": "Codice Java (.java, classi, Spring Boot, Maven)",
+    "javascript": "Codice JavaScript o TypeScript (React, Node, frontend)",
+    "python": "Codice Python (.py, script, notebook Jupyter)",
+    "shell_config": "Script shell o file di configurazione (bash, yaml, toml, ini)",
+    "web": "File web (HTML, CSS, template)",
+    # document
+    "invoice": "Fattura commerciale con importi, partita IVA, numero fattura",
+    "contract": "Contratto o accordo legale con clausole e firme",
+    "receipt": "Ricevuta o scontrino di pagamento",
+    "report": "Relazione o report analitico",
+    "certificate": "Certificato, attestato o documento ufficiale",
+    "identity_doc": "Documento di identità (carta d'identità, passaporto, codice fiscale)",
+    # notes
+    "personal_notes": "Note personali informali, diario, pensieri",
+    "todo": "Lista di cose da fare, checklist",
+    "draft": "Bozza di testo da completare",
+    # data
+    "spreadsheet": "Foglio di calcolo con dati tabellari e formule",
+    "csv_data": "Dati CSV o tabella strutturata",
+    "json_xml": "File JSON o XML con dati strutturati",
+    # communication
+    "email": "Email con mittente, destinatario, oggetto",
+    "formal_letter": "Lettera formale o ufficiale",
+    # literature
+    "poetry": "Componimento poetico in versi",
+    "fiction": "Narrativa: romanzo, racconto, novella",
+    "essay": "Saggio argomentativo o critico",
+    # tutorial
+    "manual": "Manuale tecnico o d'uso",
+    "howto": "Guida pratica passo-passo",
+}
+
+# Mapping contesto → tipi di contenuto più probabili
+CONTEXT_CONTENT_MAP = {
+    "work": ["code", "document", "data", "communication", "notes", "tutorial"],
+    "personal": ["document", "notes", "communication", "literature"],
+    "study": ["notes", "tutorial", "document", "literature", "data"],
+    "leisure": ["literature", "notes", "media_metadata"],
+}
+
+# Mapping tipo_contenuto → sotto-tipi più probabili
+CONTENT_SUB_MAP = {
+    "code": ["java", "javascript", "python", "shell_config", "web"],
+    "document": ["invoice", "contract", "receipt", "report", "certificate", "identity_doc"],
+    "notes": ["personal_notes", "todo", "draft"],
+    "data": ["spreadsheet", "csv_data", "json_xml"],
+    "communication": ["email", "formal_letter"],
+    "literature": ["poetry", "fiction", "essay"],
+    "tutorial": ["manual", "howto"],
+    "media_metadata": [],
 }
 
 # =====================================================
@@ -70,107 +113,35 @@ KEYWORD_FALLBACK_RULES = {
 # =====================================================
 
 DEFAULT_TAGS = [
-    {
-        "name": "fattura",
-        "description": "Documento che attesta un'operazione commerciale con importo dovuto, numero fattura, partita IVA e dati del fornitore/cliente",
-        "category": "finance"
-    },
-    {
-        "name": "ricevuta",
-        "description": "Documento che certifica la ricezione di un pagamento o merce, più semplice di una fattura",
-        "category": "finance"
-    },
-    {
-        "name": "contratto",
-        "description": "Accordo legale tra due o più parti che stabilisce obblighi, diritti e condizioni",
-        "category": "legal"
-    },
-    {
-        "name": "curriculum",
-        "description": "Documento personale che riassume l'esperienza lavorativa, la formazione e le competenze di una persona",
-        "category": "hr"
-    },
-    {
-        "name": "documento_identita",
-        "description": "Documento ufficiale che certifica l'identità di una persona (carta d'identità, passaporto, patente)",
-        "category": "personal"
-    },
-    {
-        "name": "documento_legale",
-        "description": "Atto notarile, sentenza, ordinanza o qualsiasi documento con valenza giuridica",
-        "category": "legal"
-    },
-    {
-        "name": "poesia",
-        "description": "Componimento letterario in versi, con struttura ritmica o metrica",
-        "category": "literature"
-    },
-    {
-        "name": "narrativa",
-        "description": "Opera letteraria in prosa: romanzo, racconto, novella",
-        "category": "literature"
-    },
-    {
-        "name": "codice_sorgente",
-        "description": "File contenente istruzioni di programmazione in qualsiasi linguaggio (Python, Java, JS, ecc.)",
-        "category": "tech"
-    },
-    {
-        "name": "foglio_calcolo",
-        "description": "Documento con dati tabellari, formule, grafici (Excel, CSV, ecc.)",
-        "category": "data"
-    },
-    {
-        "name": "presentazione",
-        "description": "Documento con slide per presentazioni (PowerPoint, Keynote, ecc.)",
-        "category": "business"
-    },
-    {
-        "name": "relazione",
-        "description": "Documento descrittivo che analizza un argomento, un progetto o un'attività",
-        "category": "business"
-    },
-    {
-        "name": "email",
-        "description": "Messaggio di posta elettronica, con mittente, destinatario e oggetto",
-        "category": "communication"
-    },
-    {
-        "name": "documento_medico",
-        "description": "Referto, prescrizione, cartella clinica, certificato medico",
-        "category": "health"
-    },
-    {
-        "name": "documento_tecnico",
-        "description": "Manuale tecnico, specifiche di progetto, documentazione di sistema",
-        "category": "tech"
-    },
-    {
-        "name": "verbale",
-        "description": "Resoconto scritto di una riunione, assemblea o seduta",
-        "category": "business"
-    },
-    {
-        "name": "busta_paga",
-        "description": "Documento che attesta la retribuzione mensile di un lavoratore dipendente",
-        "category": "finance"
-    },
-    {
-        "name": "ricetta_medica",
-        "description": "Prescrizione medica per farmaci o esami diagnostici",
-        "category": "health"
-    },
+    {"name": "fattura", "description": "Fattura commerciale", "category": "finance"},
+    {"name": "ricevuta", "description": "Ricevuta di pagamento", "category": "finance"},
+    {"name": "contratto", "description": "Contratto legale", "category": "legal"},
+    {"name": "curriculum", "description": "CV personale", "category": "hr"},
+    {"name": "documento_identita", "description": "Documento di identità", "category": "personal"},
+    {"name": "documento_legale", "description": "Documento legale", "category": "legal"},
+    {"name": "poesia", "description": "Poesia o componimento in versi", "category": "literature"},
+    {"name": "narrativa", "description": "Opera narrativa", "category": "literature"},
+    {"name": "codice_sorgente", "description": "Codice sorgente", "category": "tech"},
+    {"name": "foglio_calcolo", "description": "Foglio di calcolo", "category": "data"},
+    {"name": "presentazione", "description": "Presentazione slide", "category": "business"},
+    {"name": "relazione", "description": "Relazione o report", "category": "business"},
+    {"name": "email", "description": "Email", "category": "communication"},
+    {"name": "documento_medico", "description": "Documento medico", "category": "health"},
+    {"name": "documento_tecnico", "description": "Documentazione tecnica", "category": "tech"},
+    {"name": "verbale", "description": "Verbale di riunione", "category": "business"},
+    {"name": "busta_paga", "description": "Busta paga", "category": "finance"},
+    {"name": "ricetta_medica", "description": "Ricetta medica", "category": "health"},
 ]
 
 # =====================================================
-# FUNZIONI DI SUPPORTO - ESTRAZIONE TESTO
+# FUNZIONI ESTRAZIONE TESTO
 # =====================================================
 
 def allowed_file(filename: str) -> bool:
     return any(filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)
 
 
-def normalize_text(text: str, max_chars: int = 12000) -> str:
+def normalize_text(text: str, max_chars: int = 10000) -> str:
     return text.strip()[:max_chars]
 
 
@@ -204,15 +175,6 @@ def extract_text_from_any(path: str) -> str:
 def extract_metadata(path: str, filename: str) -> dict:
     stat = os.stat(path)
     ext = os.path.splitext(filename.lower())[1]
-    return {
-        "filename": filename,
-        "extension": ext,
-        "size_bytes": stat.st_size,
-        "mime_type": guess_mime(ext)
-    }
-
-
-def guess_mime(ext: str) -> str:
     mime_map = {
         ".pdf": "application/pdf",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -221,7 +183,12 @@ def guess_mime(ext: str) -> str:
         ".csv": "text/csv",
         ".html": "text/html",
     }
-    return mime_map.get(ext, "application/octet-stream")
+    return {
+        "filename": filename,
+        "extension": ext,
+        "size_bytes": stat.st_size,
+        "mime_type": mime_map.get(ext, "application/octet-stream"),
+    }
 
 
 # =====================================================
@@ -242,301 +209,386 @@ def _ollama_model_names(tags_payload: dict) -> set:
 def is_ollama_model_available() -> bool:
     response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
     response.raise_for_status()
-    try:
-        available_models = _ollama_model_names(response.json())
-    except ValueError as exc:
-        raise requests.RequestException("Risposta non valida dall'endpoint tags di Ollama.") from exc
-    return OLLAMA_MODEL in available_models or OLLAMA_MODEL.split(":", 1)[0] in available_models
+    available = _ollama_model_names(response.json())
+    return OLLAMA_MODEL in available or OLLAMA_MODEL.split(":", 1)[0] in available
 
 
 def ensure_ollama_model_available() -> None:
     if is_ollama_model_available():
         return
-    pull_response = requests.post(
+    pull = requests.post(
         f"{OLLAMA_BASE_URL}/api/pull",
         json={"name": OLLAMA_MODEL, "stream": False},
         timeout=OLLAMA_TIMEOUT,
     )
-    pull_response.raise_for_status()
-    try:
-        pull_payload = pull_response.json()
-    except ValueError as exc:
-        raise requests.RequestException("Risposta non valida durante il pull del modello Ollama.") from exc
-    if pull_payload.get("error"):
-        raise requests.RequestException(pull_payload["error"])
+    pull.raise_for_status()
+    payload = pull.json()
+    if payload.get("error"):
+        raise requests.RequestException(payload["error"])
 
 
-def format_ollama_error(error: requests.RequestException) -> str:
-    response = getattr(error, "response", None)
-    if response is None:
-        return str(error)
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = {}
-    return payload.get("error") or payload.get("message") or response.text or str(error)
-
-
-# =====================================================
-# CORE AI: ANALISI CON TAG MULTI-LABEL + CONFIDENCE
-# =====================================================
-
-def build_tags_context(custom_tags: list = None) -> str:
-    """Costruisce il contesto dei tag per il prompt AI."""
-    all_tags = DEFAULT_TAGS.copy()
-    if custom_tags:
-        all_tags.extend(custom_tags)
-    
-    tags_desc = []
-    for tag in all_tags:
-        desc = f'- "{tag["name"]}": {tag["description"]}'
-        if tag.get("category"):
-            desc += f' [categoria: {tag["category"]}]'
-        tags_desc.append(desc)
-    
-    return "\n".join(tags_desc)
-
-
-def normalize_tag_name(tag_name: str) -> str:
-    if not tag_name:
-        return ""
-    normalized = tag_name.strip().lower().replace("-", "_").replace(" ", "_")
-    normalized = TAG_NAME_ALIASES.get(normalized, normalized)
-    return TAG_NAME_ALIASES.get(normalized.replace("_", " "), normalized)
-
-
-def extract_tag_scores_from_raw(raw: dict | list, known_tags: set) -> dict:
-    scores = {}
-
-    def push_score(name: str, confidence: float):
-        normalized = normalize_tag_name(name)
-        if normalized not in known_tags:
-            return
-        bounded = max(0.0, min(1.0, float(confidence or 0.0)))
-        scores[normalized] = max(scores.get(normalized, 0.0), bounded)
-
-    if isinstance(raw, dict):
-        raw_scores = raw.get("tag_scores")
-        if isinstance(raw_scores, dict):
-            for name, conf in raw_scores.items():
-                push_score(name, conf)
-
-        raw_tags = raw.get("tags")
-        if isinstance(raw_tags, list):
-            for item in raw_tags:
-                if isinstance(item, dict):
-                    push_score(item.get("name", ""), item.get("confidence", 0.0))
-                elif isinstance(item, str):
-                    push_score(item, 0.65)
-
-        primary = raw.get("primary_tags")
-        if isinstance(primary, list):
-            for item in primary:
-                if isinstance(item, str):
-                    push_score(item, 0.7)
-
-    elif isinstance(raw, list):
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            tags = item.get("tags")
-            conf = item.get("confidence", 0.0)
-            if isinstance(tags, list):
-                for t in tags:
-                    if isinstance(t, str):
-                        push_score(t, conf)
-
-    return scores
-
-
-def keyword_fallback_scores(text: str, known_tags: set) -> dict:
-    lower_text = text.lower()
-    fallback = {}
-    for tag_name, keywords in KEYWORD_FALLBACK_RULES.items():
-        if tag_name not in known_tags:
-            continue
-        hits = sum(1 for keyword in keywords if keyword in lower_text)
-        if hits <= 0:
-            continue
-        # 1 keyword -> 0.56, 2 -> 0.67, 3+ -> 0.78
-        fallback[tag_name] = min(0.78, 0.45 + (hits * 0.11))
-    return fallback
-
-
-def call_ollama_tag_analysis(text: str, filename: str, custom_tags: list = None) -> dict:
-    """
-    Analisi AI che restituisce TAG MULTIPLI con confidence score.
-    Ogni file può avere più tag, le percentuali NON sommano a 100%.
-    """
+def call_ollama_raw(prompt: str) -> dict:
+    """Chiama Ollama e restituisce il JSON parsato dalla risposta."""
     ensure_ollama_model_available()
-    
-    tags_context = build_tags_context(custom_tags)
-    tag_names = [t["name"] for t in DEFAULT_TAGS]
-    if custom_tags:
-        tag_names.extend([t["name"] for t in custom_tags])
-    
-    tags_json_template = "{" + ", ".join([f'"{name}": 0.0' for name in tag_names]) + "}"
-
-    prompt = f"""Sei un esperto classificatore di documenti. Analizza questo documento e assegna un punteggio di confidenza (0.0 a 1.0) a OGNI tag elencato.
-
-IMPORTANTE:
-- Ogni tag è INDIPENDENTE: le percentuali NON devono sommare a 100%
-- Un documento PUÒ avere più tag con alta confidenza contemporaneamente
-- Assegna punteggi alti (>0.7) SOLO quando sei molto sicuro
-- Un documento può essere sia "fattura" (0.95) che "documento_legale" (0.60) allo stesso tempo
-
-FILE: {filename}
-
-TAG DISPONIBILI (con descrizione):
-{tags_context}
-
-DOCUMENTO:
-```
-{text[:6000]}
-```
-
-Rispondi SOLO con JSON valido in questo formato esatto:
-{{
-  "tag_scores": {tags_json_template},
-  "primary_tags": ["tag1", "tag2"],
-  "summary": "breve descrizione del documento in italiano (max 100 parole)",
-  "extracted_data": {{
-    "data_documento": null,
-    "soggetti_coinvolti": [],
-    "importo_totale": null,
-    "note": ""
-  }}
-}}"""
-
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
         "format": "json",
         "stream": False,
-        "options": {
-            "temperature": 0.1,
-            "top_p": 0.9
-        }
+        "options": {"temperature": 0.1, "top_p": 0.9},
     }
-
-    response = requests.post(
+    resp = requests.post(
         f"{OLLAMA_BASE_URL}/api/generate",
         json=payload,
-        timeout=OLLAMA_TIMEOUT
+        timeout=OLLAMA_TIMEOUT,
     )
-    response.raise_for_status()
-    data = response.json()
-    raw = json.loads(data.get("response", "{}"))
+    resp.raise_for_status()
+    data = resp.json()
+    return json.loads(data.get("response", "{}"))
 
-    known_tags = set(tag_names)
-    tag_scores = extract_tag_scores_from_raw(raw, known_tags)
-    if not tag_scores:
-        tag_scores = keyword_fallback_scores(text, known_tags)
 
-    # Costruisce lista tag con confidence > 0.05 (filtra rumore)
-    tags_with_confidence = []
-    
-    for tag_name, confidence in tag_scores.items():
-        confidence = max(0.0, min(1.0, float(confidence or 0.0)))
-        if confidence > 0.05:
-            # Trova info tag
-            tag_info = next((t for t in DEFAULT_TAGS if t["name"] == tag_name), None)
-            if not tag_info and custom_tags:
-                tag_info = next((t for t in custom_tags if t["name"] == tag_name), None)
-            
-            tags_with_confidence.append({
-                "name": tag_name,
-                "confidence": round(confidence, 4),
-                "description": tag_info["description"] if tag_info else "",
-                "category": tag_info.get("category", "other") if tag_info else "other",
-                "is_default": tag_info in DEFAULT_TAGS if tag_info else True
-            })
-    
-    # Ordina per confidenza decrescente
-    tags_with_confidence.sort(key=lambda x: x["confidence"], reverse=True)
-    
-    summary = raw.get("summary", "") if isinstance(raw, dict) else ""
-    if not summary and tags_with_confidence:
-        top = tags_with_confidence[0]
-        summary = f"Documento classificato principalmente come '{top['name']}'."
+# =====================================================
+# CLASSIFICAZIONE GERARCHICA A 3 LIVELLI
+# =====================================================
 
-    extracted_data = raw.get("extracted_data", {}) if isinstance(raw, dict) else {}
+def step1_classify_context(text: str, filename: str, custom_type_descriptions: dict = None) -> dict:
+    """
+    STEP 1 – Classificazione del CONTESTO
+    Restituisce: { context_name: probability (0.0-1.0), ... }
+    """
+    contexts_desc = "\n".join(
+        [f'- "{k}": {v}' for k, v in CONTEXTS.items()]
+    )
+    # Aggiunge eventuali tipi personalizzati dell'utente
+    if custom_type_descriptions:
+        extra = "\n".join([f'- "{k}": {v}' for k, v in custom_type_descriptions.items()])
+        contexts_desc += "\n" + extra
+
+    template = "{" + ", ".join([f'"{k}": 0.0' for k in list(CONTEXTS.keys()) + (list(custom_type_descriptions.keys()) if custom_type_descriptions else [])]) + "}"
+
+    prompt = f"""Sei un esperto classificatore. Analizza questo documento e assegna una probabilità (0.0-1.0) a ogni CONTESTO.
+
+Le probabilità sono INDIPENDENTI e non devono sommare a 1.
+Assegna valori alti solo quando sei molto sicuro.
+
+FILE: {filename}
+
+CONTESTI DISPONIBILI:
+{contexts_desc}
+
+DOCUMENTO (prime 3000 caratteri):
+```
+{text[:3000]}
+```
+
+Rispondi SOLO con JSON valido:
+{{
+  "scores": {template},
+  "reasoning": "breve motivazione in italiano"
+}}"""
+
+    raw = call_ollama_raw(prompt)
+    scores = raw.get("scores", {})
+    # Normalizza scores
+    result = {}
+    for k in CONTEXTS:
+        val = scores.get(k, 0.0)
+        result[k] = round(max(0.0, min(1.0, float(val))), 4)
+    if custom_type_descriptions:
+        for k in custom_type_descriptions:
+            val = scores.get(k, 0.0)
+            result[k] = round(max(0.0, min(1.0, float(val))), 4)
+    return {
+        "scores": result,
+        "reasoning": raw.get("reasoning", ""),
+        "top": max(result, key=result.get) if result else "work",
+    }
+
+
+def step2_classify_content_type(text: str, filename: str, context_scores: dict, custom_type_descriptions: dict = None) -> dict:
+    """
+    STEP 2 – Classificazione del TIPO DI CONTENUTO
+    Basata sul contesto dominante del passo precedente.
+    Restituisce: { content_type_name: probability, ... }
+    """
+    # Trova il contesto dominante e i tipi di contenuto attesi
+    top_context = max(context_scores, key=context_scores.get) if context_scores else "work"
+    expected_types = CONTEXT_CONTENT_MAP.get(top_context, list(CONTENT_TYPES.keys()))
+
+    # Mostra solo i tipi rilevanti per il contesto
+    types_desc = "\n".join(
+        [f'- "{k}": {CONTENT_TYPES[k]}' for k in expected_types if k in CONTENT_TYPES]
+    )
+    if custom_type_descriptions:
+        types_desc += "\n" + "\n".join([f'- "{k}": {v}' for k, v in custom_type_descriptions.items()])
+
+    template = "{" + ", ".join([f'"{k}": 0.0' for k in expected_types]) + "}"
+
+    prompt = f"""Contesto rilevato: "{top_context}".
+Ora classifica il TIPO DI CONTENUTO del documento tra le opzioni seguenti.
+
+FILE: {filename}
+
+TIPI DI CONTENUTO:
+{types_desc}
+
+DOCUMENTO:
+```
+{text[:4000]}
+```
+
+Rispondi SOLO con JSON valido:
+{{
+  "scores": {template},
+  "reasoning": "motivazione"
+}}"""
+
+    raw = call_ollama_raw(prompt)
+    scores = raw.get("scores", {})
+    result = {}
+    for k in expected_types:
+        val = scores.get(k, 0.0)
+        result[k] = round(max(0.0, min(1.0, float(val))), 4)
+    return {
+        "scores": result,
+        "reasoning": raw.get("reasoning", ""),
+        "top": max(result, key=result.get) if result else "document",
+    }
+
+
+def step3_classify_sub_type(text: str, filename: str, content_type_scores: dict, custom_type_descriptions: dict = None) -> dict:
+    """
+    STEP 3 – Classificazione del SOTTO-TIPO
+    Basata sul tipo di contenuto dominante del passo precedente.
+    Restituisce: { sub_type_name: probability, ... }
+    """
+    top_content = max(content_type_scores, key=content_type_scores.get) if content_type_scores else "document"
+    expected_subtypes = CONTENT_SUB_MAP.get(top_content, [])
+
+    if not expected_subtypes:
+        return {"scores": {}, "reasoning": "Nessun sotto-tipo disponibile per questo tipo di contenuto", "top": None}
+
+    subtypes_desc = "\n".join(
+        [f'- "{k}": {SUB_TYPES[k]}' for k in expected_subtypes if k in SUB_TYPES]
+    )
+    if custom_type_descriptions:
+        subtypes_desc += "\n" + "\n".join([f'- "{k}": {v}' for k, v in custom_type_descriptions.items()])
+
+    template = "{" + ", ".join([f'"{k}": 0.0' for k in expected_subtypes]) + "}"
+
+    prompt = f"""Tipo di contenuto rilevato: "{top_content}".
+Ora classifica il SOTTO-TIPO specifico del documento.
+
+FILE: {filename}
+
+SOTTO-TIPI DISPONIBILI:
+{subtypes_desc}
+
+DOCUMENTO:
+```
+{text[:4000]}
+```
+
+Rispondi SOLO con JSON valido:
+{{
+  "scores": {template},
+  "extracted_data": {{
+    "data_documento": null,
+    "soggetti_coinvolti": [],
+    "importo_totale": null,
+    "note": ""
+  }},
+  "summary": "descrizione breve in italiano (max 80 parole)"
+}}"""
+
+    raw = call_ollama_raw(prompt)
+    scores = raw.get("scores", {})
+    result = {}
+    for k in expected_subtypes:
+        val = scores.get(k, 0.0)
+        result[k] = round(max(0.0, min(1.0, float(val))), 4)
+    return {
+        "scores": result,
+        "reasoning": "",
+        "top": max(result, key=result.get) if result else None,
+        "extracted_data": raw.get("extracted_data", {}),
+        "summary": raw.get("summary", ""),
+    }
+
+
+def hierarchical_classify(text: str, filename: str, custom_type_descriptions: dict = None) -> dict:
+    """
+    Classificazione gerarchica completa a 3 livelli.
+    Restituisce struttura con tutti e 3 i livelli di classificazione.
+    """
+    # Step 1: Contesto
+    step1 = step1_classify_context(text, filename, custom_type_descriptions)
+
+    # Step 2: Tipo di contenuto (basato sul contesto)
+    step2 = step2_classify_content_type(text, filename, step1["scores"], custom_type_descriptions)
+
+    # Step 3: Sotto-tipo (basato sul tipo di contenuto)
+    step3 = step3_classify_sub_type(text, filename, step2["scores"], custom_type_descriptions)
+
+    # Costruisce il risultato finale
+    file_id = str(uuid.uuid4())
+
+    # Tag suggeriti basati sulla classificazione gerarchica
+    suggested_tags = build_tags_from_hierarchy(step1, step2, step3)
 
     return {
-        "tags": tags_with_confidence,
-        "primary_tags": [t["name"] for t in tags_with_confidence[:3]],
-        "summary": summary,
-        "extracted_data": extracted_data
+        "file_id": file_id,
+        "filename": filename,
+        "hierarchical_classification": {
+            "step1_context": {
+                "scores": step1["scores"],
+                "top": step1["top"],
+                "reasoning": step1.get("reasoning", ""),
+            },
+            "step2_content_type": {
+                "scores": step2["scores"],
+                "top": step2["top"],
+                "reasoning": step2.get("reasoning", ""),
+            },
+            "step3_sub_type": {
+                "scores": step3["scores"],
+                "top": step3.get("top"),
+            },
+        },
+        "tags": suggested_tags,
+        "primary_tags": [t["name"] for t in suggested_tags[:3]],
+        "summary": step3.get("summary", ""),
+        "extracted_data": step3.get("extracted_data", {}),
+        "suggested_folder": map_to_folder(step1["top"], step2["top"], step3.get("top")),
+        "ambiguous": is_ambiguous(step1, step2, step3),
     }
+
+
+def build_tags_from_hierarchy(step1: dict, step2: dict, step3: dict) -> list:
+    """Costruisce la lista di tag con confidence dal risultato gerarchico."""
+    tags = []
+    seen = set()
+
+    # Aggiungi tag dal contesto
+    for name, score in sorted(step1["scores"].items(), key=lambda x: -x[1]):
+        if score >= 0.4 and name not in seen:
+            tags.append({"name": name, "confidence": score, "category": "context", "description": CONTEXTS.get(name, "")})
+            seen.add(name)
+
+    # Aggiungi tag dal tipo di contenuto
+    for name, score in sorted(step2["scores"].items(), key=lambda x: -x[1]):
+        if score >= 0.45 and name not in seen:
+            tags.append({"name": name, "confidence": score, "category": "content_type", "description": CONTENT_TYPES.get(name, "")})
+            seen.add(name)
+
+    # Aggiungi tag dal sotto-tipo
+    for name, score in sorted(step3["scores"].items(), key=lambda x: -x[1]):
+        if score >= 0.45 and name not in seen:
+            tags.append({"name": name, "confidence": score, "category": "sub_type", "description": SUB_TYPES.get(name, "")})
+            seen.add(name)
+
+    # Aggiungi mappatura a tag del sistema
+    top_subtype = step3.get("top")
+    top_content = step2.get("top")
+    system_tag_map = {
+        "invoice": "fattura", "contract": "contratto", "receipt": "ricevuta",
+        "report": "relazione", "email": "email", "poetry": "poesia",
+        "fiction": "narrativa", "spreadsheet": "foglio_calcolo",
+        "java": "codice_sorgente", "python": "codice_sorgente",
+        "javascript": "codice_sorgente", "manual": "documento_tecnico",
+    }
+    if top_subtype and top_subtype in system_tag_map:
+        sys_tag = system_tag_map[top_subtype]
+        if sys_tag not in seen:
+            subtype_score = step3["scores"].get(top_subtype, 0.0)
+            tags.append({"name": sys_tag, "confidence": subtype_score, "category": "system", "description": ""})
+            seen.add(sys_tag)
+
+    return sorted(tags, key=lambda x: -x["confidence"])
+
+
+def is_ambiguous(step1: dict, step2: dict, step3: dict) -> bool:
+    """
+    Determina se la classificazione è ambigua.
+    Ambigua = differenza < 0.15 tra i due punteggi più alti
+    """
+    def check_ambiguity(scores: dict) -> bool:
+        if not scores:
+            return False
+        vals = sorted(scores.values(), reverse=True)
+        if len(vals) < 2:
+            return False
+        return abs(vals[0] - vals[1]) < 0.15 and vals[0] > 0.3
+
+    return check_ambiguity(step1["scores"]) or check_ambiguity(step2["scores"])
+
+
+def map_to_folder(context: str, content_type: str, sub_type: str) -> str:
+    """Suggerisce la cartella di destinazione basandosi sulla gerarchia."""
+    folder_map = {
+        ("work", "code", "java"): "Lavoro/Codice/Java",
+        ("work", "code", "python"): "Lavoro/Codice/Python",
+        ("work", "code", "javascript"): "Lavoro/Codice/JavaScript",
+        ("work", "code", None): "Lavoro/Codice",
+        ("work", "document", "invoice"): "Lavoro/Documenti/Fatture",
+        ("work", "document", "contract"): "Lavoro/Documenti/Contratti",
+        ("work", "document", "report"): "Lavoro/Documenti/Report",
+        ("work", "document", None): "Lavoro/Documenti",
+        ("work", "notes", None): "Lavoro/Note",
+        ("work", "tutorial", None): "Lavoro/Guide",
+        ("work", "data", None): "Lavoro/Dati",
+        ("personal", "document", "identity_doc"): "Personale/Identità",
+        ("personal", "document", None): "Personale/Documenti",
+        ("personal", "notes", None): "Personale/Note",
+        ("study", "notes", None): "Studio/Appunti",
+        ("study", "tutorial", None): "Studio/Guide",
+        ("study", "document", None): "Studio/Documenti",
+        ("leisure", "literature", "poetry"): "Svago/Letteratura/Poesie",
+        ("leisure", "literature", "fiction"): "Svago/Letteratura/Narrativa",
+        ("leisure", "literature", None): "Svago/Letteratura",
+    }
+    key = (context, content_type, sub_type)
+    if key in folder_map:
+        return folder_map[key]
+    key2 = (context, content_type, None)
+    if key2 in folder_map:
+        return folder_map[key2]
+    key3 = (context, None, None)
+    context_folder_map = {
+        "work": "Lavoro", "personal": "Personale",
+        "study": "Studio", "leisure": "Svago",
+    }
+    return context_folder_map.get(context, "Altro")
 
 
 # =====================================================
 # ENDPOINT API
 # =====================================================
 
-@app.route("/api/analyze", methods=["POST"])
-def analyze_file():
-    """
-    Endpoint legacy: estrae dati strutturati dal documento.
-    Compatibile con il frontend Svelte esistente.
-    """
-    file = request.files.get("file")
-    if not file:
-        return jsonify({"error": "File mancante"}), 400
-
-    tmp_path = os.path.join(UPLOAD_DIR, file.filename)
-    try:
-        file.save(tmp_path)
-        raw_text = extract_text_from_any(tmp_path)
-        text = normalize_text(raw_text)
-
-        if not text:
-            return jsonify({"error": "Testo vuoto o non estraibile"}), 400
-
-        # Usa il nuovo sistema di tag
-        result = call_ollama_tag_analysis(text, file.filename)
-        
-        # Compatibilità con vecchio formato
-        extracted = result.get("extracted_data", {})
-        extracted["tipo_documento"] = result["primary_tags"][0] if result["primary_tags"] else "altro"
-        extracted["descrizione_breve"] = result.get("summary", "")
-
-    except ValueError as ve:
-        return jsonify({"error": str(ve)}), 400
-    except requests.RequestException as re:
-        return jsonify({"error": f"Errore Ollama: {format_ollama_error(re)}"}), 503
-    except Exception as e:
-        return jsonify({"error": f"Errore interno: {str(e)}"}), 500
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-    return jsonify({
-        "filename": file.filename,
-        "extracted_data": extracted
-    })
-
-
 @app.route("/api/classify", methods=["POST"])
 def classify_file():
     """
-    Endpoint principale: classifica il documento con tag MULTI-LABEL e confidence scores.
-    
+    Endpoint principale: classificazione gerarchica a 3 livelli.
+
     Input: multipart/form-data con:
-        - file: il documento da analizzare
-        - custom_tags (opzionale): JSON array di tag custom dell'utente
-    
-    Response format:
+        - file: documento da analizzare
+        - custom_tags (opzionale): JSON con tipi personalizzati dell'utente
+          formato: {"nome_tipo": "descrizione semantica", ...}
+
+    Response:
     {
         "file_id": "uuid",
         "filename": "example.pdf",
-        "tags": [
-            {"name": "fattura", "confidence": 0.92, "description": "...", "category": "finance"},
-            {"name": "documento_legale", "confidence": 0.45, "description": "...", "category": "legal"},
-            ...
-        ],
-        "primary_tags": ["fattura"],
-        "summary": "Descrizione del documento...",
+        "hierarchical_classification": {
+            "step1_context": { "scores": {...}, "top": "work" },
+            "step2_content_type": { "scores": {...}, "top": "document" },
+            "step3_sub_type": { "scores": {...}, "top": "invoice" }
+        },
+        "tags": [ {"name": "fattura", "confidence": 0.92, ...} ],
+        "primary_tags": ["fattura", "document", "work"],
+        "summary": "...",
+        "suggested_folder": "Lavoro/Documenti/Fatture",
+        "ambiguous": false,
         "extracted_data": {...},
         "metadata": {...}
     }
@@ -546,13 +598,13 @@ def classify_file():
         return jsonify({"error": "File mancante", "code": "FILE_MISSING"}), 400
 
     filename = file.filename or "unknown"
-    
-    # Tag custom opzionali dell'utente
+
+    # Tipi personalizzati opzionali
     custom_tags_raw = request.form.get("custom_tags")
-    custom_tags = []
+    custom_type_descriptions = None
     if custom_tags_raw:
         try:
-            custom_tags = json.loads(custom_tags_raw)
+            custom_type_descriptions = json.loads(custom_tags_raw)
         except Exception:
             pass
 
@@ -564,53 +616,90 @@ def classify_file():
         text = normalize_text(raw_text)
 
         if not text:
-            return jsonify({
-                "error": "Testo vuoto o non estraibile dal file",
-                "code": "EMPTY_TEXT"
-            }), 400
+            return jsonify({"error": "Testo vuoto o non estraibile", "code": "EMPTY_TEXT"}), 400
 
         metadata = extract_metadata(tmp_path, filename)
-        ai_result = call_ollama_tag_analysis(text, filename, custom_tags)
+        result = hierarchical_classify(text, filename, custom_type_descriptions)
+        result["extracted_text"] = text[:2000]
+        result["metadata"] = metadata
 
     except ValueError as ve:
         return jsonify({"error": str(ve), "code": "FILE_NOT_SUPPORTED"}), 400
     except requests.RequestException as re:
-        return jsonify({
-            "error": f"Servizio AI non disponibile: {format_ollama_error(re)}",
-            "code": "ANALYSIS_FAILED"
-        }), 503
+        return jsonify({"error": f"Servizio AI non disponibile: {str(re)}", "code": "ANALYSIS_FAILED"}), 503
     except Exception as e:
         return jsonify({"error": f"Errore interno: {str(e)}", "code": "INTERNAL_ERROR"}), 500
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-    file_id = str(uuid.uuid4())
+    return jsonify(result)
 
-    return jsonify({
-        "file_id": file_id,
-        "filename": filename,
-        "tags": ai_result["tags"],
-        "primary_tags": ai_result["primary_tags"],
-        "summary": ai_result["summary"],
-        "extracted_text": text[:2000],
-        "metadata": metadata,
-        "extracted_data": ai_result["extracted_data"]
-    })
+
+@app.route("/api/analyze", methods=["POST"])
+def analyze_file_legacy():
+    """Endpoint legacy compatibile col frontend Svelte."""
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "File mancante"}), 400
+
+    filename = file.filename or "unknown"
+    tmp_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}_{filename}")
+
+    try:
+        file.save(tmp_path)
+        raw_text = extract_text_from_any(tmp_path)
+        text = normalize_text(raw_text)
+
+        if not text:
+            return jsonify({"error": "Testo vuoto"}), 400
+
+        result = hierarchical_classify(text, filename)
+        h = result["hierarchical_classification"]
+
+        # Risposta formato legacy
+        extracted = result.get("extracted_data", {})
+        top_tag = result["primary_tags"][0] if result["primary_tags"] else "altro"
+        extracted["tipo_documento"] = top_tag
+        extracted["descrizione_breve"] = result.get("summary", "")
+        extracted["context"] = h["step1_context"]["top"]
+        extracted["content_type"] = h["step2_content_type"]["top"]
+        extracted["sub_type"] = h["step3_sub_type"]["top"]
+
+    except Exception as e:
+        return jsonify({"error": f"Errore: {str(e)}"}), 500
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    return jsonify({"filename": filename, "extracted_data": extracted})
 
 
 @app.route("/api/tags/default", methods=["GET"])
 def get_default_tags():
-    """Restituisce i tag di default del sistema."""
-    return jsonify({
-        "tags": DEFAULT_TAGS,
-        "count": len(DEFAULT_TAGS)
-    })
+    return jsonify({"tags": DEFAULT_TAGS, "count": len(DEFAULT_TAGS)})
+
+
+@app.route("/api/contexts", methods=["GET"])
+def get_contexts():
+    """Restituisce i contesti del livello 1."""
+    return jsonify({"contexts": CONTEXTS})
+
+
+@app.route("/api/content-types", methods=["GET"])
+def get_content_types():
+    """Restituisce i tipi di contenuto del livello 2."""
+    return jsonify({"content_types": CONTENT_TYPES, "context_map": CONTEXT_CONTENT_MAP})
+
+
+@app.route("/api/sub-types", methods=["GET"])
+def get_sub_types():
+    """Restituisce i sotto-tipi del livello 3."""
+    return jsonify({"sub_types": SUB_TYPES, "content_map": CONTENT_SUB_MAP})
 
 
 @app.route("/api/health", methods=["GET"])
 def health_check():
-    """Verifica stato del servizio e connessione Ollama."""
     ollama_ok = False
     model_ok = False
     try:
@@ -626,8 +715,10 @@ def health_check():
         "ollama_connected": ollama_ok,
         "ollama_model_available": model_ok,
         "model": OLLAMA_MODEL,
-        "default_tags_count": len(DEFAULT_TAGS),
-        "supported_extensions": list(ALLOWED_EXTENSIONS)
+        "classification_levels": 3,
+        "contexts": list(CONTEXTS.keys()),
+        "content_types": list(CONTENT_TYPES.keys()),
+        "supported_extensions": list(ALLOWED_EXTENSIONS),
     })
 
 
@@ -638,7 +729,6 @@ def health_check():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5001))
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
-    print(f"DocuMind Python AI Backend avviato su porta {port}")
-    print(f"Ollama: {OLLAMA_BASE_URL} | Modello: {OLLAMA_MODEL}")
-    print(f"Tag di default disponibili: {len(DEFAULT_TAGS)}")
+    print(f"DocuMind Python AI Backend - Classificazione Gerarchica 3 livelli")
+    print(f"Porta: {port} | Ollama: {OLLAMA_BASE_URL} | Modello: {OLLAMA_MODEL}")
     app.run(host="0.0.0.0", port=port, debug=debug)

@@ -2,22 +2,10 @@
 
 import { useState } from "react";
 import styled from "styled-components";
-
-type FolderChoice = {
-  id: string;
-  label: string;
-  icon: string;
-  description: string;
-};
-
-const FOLDER_OPTIONS: FolderChoice[] = [
-  { id: "personal", label: "Personale", icon: "👤", description: "Documenti di identità, anagrafe, famiglia" },
-  { id: "work", label: "Lavoro", icon: "💼", description: "Contratti, buste paga, documenti aziendali" },
-  { id: "finance", label: "Finanza", icon: "💰", description: "Fatture, ricevute, estratti conto" },
-  { id: "health", label: "Salute", icon: "🏥", description: "Referti, prescrizioni, documenti medici" },
-  { id: "legal", label: "Legale", icon: "⚖️", description: "Atti, contratti, documenti notarili" },
-  { id: "tech", label: "Tech", icon: "💻", description: "Manuali, codice, documentazione tecnica" },
-];
+import {
+  DEFAULT_ONBOARDING_SELECTION,
+  ONBOARDING_FOLDER_OPTIONS,
+} from "@/lib/onboardingFolders";
 
 type Props = {
   onComplete: (selectedFolders: string[]) => void;
@@ -26,7 +14,7 @@ type Props = {
 
 export default function OnboardingModal({ onComplete, onSkip }: Props) {
   const [step, setStep] = useState(1);
-  const [selectedFolders, setSelectedFolders] = useState<string[]>(["personal", "work"]);
+  const [selectedFolders, setSelectedFolders] = useState<string[]>(DEFAULT_ONBOARDING_SELECTION);
 
   const toggleFolder = (id: string) => {
     setSelectedFolders((prev) =>
@@ -92,7 +80,7 @@ export default function OnboardingModal({ onComplete, onSkip }: Props) {
         </Header>
 
         <FolderGrid>
-          {FOLDER_OPTIONS.map((folder) => (
+          {ONBOARDING_FOLDER_OPTIONS.map((folder) => (
             <FolderCard
               key={folder.id}
               $selected={selectedFolders.includes(folder.id)}
@@ -107,7 +95,7 @@ export default function OnboardingModal({ onComplete, onSkip }: Props) {
         </FolderGrid>
 
         <InfoNote>
-          Verranno sempre create anche: <strong>Senza categoria</strong> (file con bassa confidenza AI)
+          Verranno sempre create anche: <strong>Non classificati</strong> (file con bassa confidenza AI)
           e <strong>Tutti i file</strong>.
         </InfoNote>
 

@@ -43,6 +43,10 @@ public class AnalysisResult {
     @JsonProperty("all_tags")
     private List<TagEntry> allTags;
 
+    /** Risultato classificazione gerarchica a 3 livelli */
+    @JsonProperty("hierarchical_classification")
+    private HierarchicalClassification hierarchicalClassification;
+
     private String summary;
 
     /**

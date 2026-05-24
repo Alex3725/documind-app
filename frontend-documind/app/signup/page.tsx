@@ -3,8 +3,13 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import styled, { css, keyframes } from "styled-components";
+import {
+  DEFAULT_ONBOARDING_SELECTION,
+  ONBOARDING_FOLDER_OPTIONS,
+  buildOnboardingFolderPayload,
+} from "@/lib/onboardingFolders";
 
-type Step = "form" | "success";
+type Step = "form" | "folders";
 
 type FormState = {
   name: string;
@@ -92,7 +97,9 @@ export default function SignupPage() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [serverError, setServerError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [selectedFolders, setSelectedFolders] = useState<string[]>(DEFAULT_ONBOARDING_SELECTION);
 
   const pwdStrength = passwordStrength(form.password);
 
@@ -139,7 +146,7 @@ export default function SignupPage() {
         return;
       }
 
-      setStep("success");
+      setStep("folders");
     } catch {
       setServerError("Impossibile contattare il server. Verifica la connessione.");
     } finally {
@@ -147,20 +154,139 @@ export default function SignupPage() {
     }
   };
 
-  if (step === "success") {
+  const toggleFolder = (folderId: string) => {
+    setSelectedFolders((current) =>
+      current.includes(folderId)
+        ? current.filter((id) => id !== folderId)
+        : [...current, folderId]
+    );
+  };
+
+  const finalizeArchive = async () => {
+    setIsFinalizing(true);
+    setServerError("");
+
+    try {
+      const loginResponse = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          email: form.email.trim().toLowerCase(),
+          password: form.password,
+        }),
+      });
+
+      if (!loginResponse.ok) {
+        throw new Error("Accesso automatico fallito dopo la registrazione.");
+      }
+
+      const folderPayloads = selectedFolders
+        .map((folderId) => buildOnboardingFolderPayload(folderId))
+        .filter((payload): payload is NonNullable<typeof payload> => Boolean(payload));
+
+      for (const payload of folderPayloads) {
+        const createResponse = await fetch("/api/folders", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!createResponse.ok) {
+          throw new Error("Non è stato possibile creare le cartelle iniziali.");
+        }
+      }
+
+      localStorage.setItem("documind:privacy", "1");
+      localStorage.setItem("documind:onboarding", "1");
+      localStorage.setItem(
+        "documind:folders",
+        JSON.stringify(
+          selectedFolders
+            .map((folderId) => buildOnboardingFolderPayload(folderId)?.fullPath)
+            .filter((folderPath): folderPath is string => Boolean(folderPath))
+        )
+      );
+
+      router.push("/dashboard");
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : "Impossibile completare la configurazione iniziale.");
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
+
+  if (step === "folders") {
     return (
       <Page>
         <Glow />
-        <SuccessCard>
-          <SuccessIcon>✅</SuccessIcon>
-          <SuccessTitle>Account creato!</SuccessTitle>
-          <SuccessText>
-            Benvenuto/a in DocuMind, <strong>{form.name}</strong>. Il tuo account è pronto.
-          </SuccessText>
-          <SuccessBtn onClick={() => router.push("/")}>
-            Accedi ora →
-          </SuccessBtn>
-        </SuccessCard>
+        <ExplorerCard>
+          <ExplorerHeader>
+            <ExplorerBadge>DocuMind</ExplorerBadge>
+            <ExplorerTitle>Configura l&apos;archivio iniziale</ExplorerTitle>
+            <ExplorerText>
+              Scegli le cartelle da vedere subito nell&apos;explorer. Le creeremo davvero nel tuo account.
+            </ExplorerText>
+          </ExplorerHeader>
+
+          <ExplorerLayout>
+            <ExplorerPanel>
+              <PanelLabel>Cartelle disponibili</PanelLabel>
+              <FolderList>
+                {ONBOARDING_FOLDER_OPTIONS.map((folder) => {
+                  const selected = selectedFolders.includes(folder.id);
+
+                  return (
+                    <FolderRow
+                      key={folder.id}
+                      type="button"
+                      $selected={selected}
+                      onClick={() => toggleFolder(folder.id)}
+                    >
+                      <FolderRowIcon $color={folder.color}>{folder.icon}</FolderRowIcon>
+                      <FolderRowBody>
+                        <FolderRowTitle>{folder.label}</FolderRowTitle>
+                        <FolderRowDesc>{folder.description}</FolderRowDesc>
+                      </FolderRowBody>
+                      <FolderRowCheck $selected={selected}>{selected ? "✓" : "+"}</FolderRowCheck>
+                    </FolderRow>
+                  );
+                })}
+              </FolderList>
+            </ExplorerPanel>
+
+            <PreviewPanel>
+              <PanelLabel>Anteprima explorer</PanelLabel>
+              <PreviewTree>
+                {selectedFolders.map((folderId) => {
+                  const folder = ONBOARDING_FOLDER_OPTIONS.find((option) => option.id === folderId);
+                  if (!folder) return null;
+
+                  return (
+                    <PreviewRow key={folder.id}>
+                      <PreviewFolderIcon $color={folder.color}>{folder.icon}</PreviewFolderIcon>
+                      <PreviewBody>
+                        <PreviewName>{folder.fullPath}</PreviewName>
+                        <PreviewMeta>{folder.description}</PreviewMeta>
+                      </PreviewBody>
+                    </PreviewRow>
+                  );
+                })}
+                <PreviewHint>
+                  Verranno aggiunte anche le cartelle di sistema <strong>Non classificati</strong> e <strong>Tutti i file</strong>.
+                </PreviewHint>
+              </PreviewTree>
+            </PreviewPanel>
+          </ExplorerLayout>
+
+          <ExplorerActions>
+            <SecondaryButton type="button" onClick={() => router.push("/")}>Fallo dopo</SecondaryButton>
+            <PrimaryButton type="button" onClick={finalizeArchive} disabled={isFinalizing || selectedFolders.length === 0}>
+              {isFinalizing ? "Creo l'archivio..." : "Crea archivio →"}
+            </PrimaryButton>
+          </ExplorerActions>
+        </ExplorerCard>
       </Page>
     );
   }
@@ -516,6 +642,229 @@ const LoginLink = styled.p`
   text-align: center;
   font-size: 0.86rem;
   color: #666;
+`;
+
+const ExplorerCard = styled.section`
+  width: min(100%, 980px);
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(13,53,43,0.1);
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(7,43,44,0.12);
+  padding: 32px;
+  animation: ${fadeIn} 0.3s ease;
+  z-index: 1;
+`;
+
+const ExplorerHeader = styled.div`
+  margin-bottom: 22px;
+`;
+
+const ExplorerBadge = styled.p`
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 11px;
+  color: #4d7f72;
+  font-weight: 700;
+`;
+
+const ExplorerTitle = styled.h1`
+  font-size: 1.75rem;
+  color: #113f36;
+  margin: 10px 0 6px;
+`;
+
+const ExplorerText = styled.p`
+  color: #555;
+  font-size: 0.9rem;
+  margin: 0;
+`;
+
+const ExplorerLayout = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 16px;
+
+  @media (max-width: 860px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ExplorerPanel = styled.div`
+  border: 1px solid #dbe7e2;
+  background: #f8fbfa;
+  border-radius: 18px;
+  padding: 16px;
+`;
+
+const PreviewPanel = styled.div`
+  border: 1px solid #dbe7e2;
+  background: linear-gradient(180deg, #fdfefe 0%, #f5fbf8 100%);
+  border-radius: 18px;
+  padding: 16px;
+`;
+
+const PanelLabel = styled.div`
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4d7f72;
+  font-weight: 700;
+  margin-bottom: 12px;
+`;
+
+const FolderList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const FolderRow = styled.button<{ $selected: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid ${({ $selected }) => ($selected ? "#1b6f5c" : "#d7e1dd")};
+  background: ${({ $selected }) => ($selected ? "#eef9f4" : "#fff")};
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: #1b6f5c;
+    background: #f7fcf9;
+  }
+`;
+
+const FolderRowIcon = styled.div<{ $color: string }>`
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: ${({ $color }) => `${$color}15`};
+  color: ${({ $color }) => $color};
+  flex-shrink: 0;
+`;
+
+const FolderRowBody = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const FolderRowTitle = styled.div`
+  font-weight: 800;
+  color: #113f36;
+  font-size: 0.92rem;
+`;
+
+const FolderRowDesc = styled.div`
+  color: #5f716c;
+  font-size: 0.78rem;
+  margin-top: 2px;
+  line-height: 1.35;
+`;
+
+const FolderRowCheck = styled.div<{ $selected: boolean }>`
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 0.78rem;
+  background: ${({ $selected }) => ($selected ? "#1b6f5c" : "#edf1ef")};
+  color: ${({ $selected }) => ($selected ? "#fff" : "#6b7280")};
+  flex-shrink: 0;
+`;
+
+const PreviewTree = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const PreviewRow = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #e1ece7;
+`;
+
+const PreviewFolderIcon = styled.div<{ $color: string }>`
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: ${({ $color }) => `${$color}14`};
+  color: ${({ $color }) => $color};
+  flex-shrink: 0;
+`;
+
+const PreviewBody = styled.div`
+  min-width: 0;
+`;
+
+const PreviewName = styled.div`
+  font-weight: 800;
+  color: #113f36;
+  font-size: 0.9rem;
+`;
+
+const PreviewMeta = styled.div`
+  color: #64756f;
+  font-size: 0.78rem;
+  margin-top: 2px;
+  line-height: 1.35;
+`;
+
+const PreviewHint = styled.div`
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fffbf0;
+  border: 1px solid #f0d88a;
+  color: #7a5f10;
+  font-size: 0.82rem;
+  line-height: 1.45;
+`;
+
+const ExplorerActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+`;
+
+const SecondaryButton = styled.button`
+  padding: 11px 20px;
+  border: 1px solid #cfd9d5;
+  background: #fff;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #55635f;
+  font-size: 0.9rem;
+
+  &:hover { background: #f5f7f6; }
+`;
+
+const PrimaryButton = styled.button`
+  padding: 11px 24px;
+  background: linear-gradient(135deg, #1b6f5c 0%, #245c99 100%);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
+  &:disabled { opacity: 0.45; cursor: not-allowed; }
 `;
 
 const LoginAnchor = styled.button`

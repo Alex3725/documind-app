@@ -1,574 +1,606 @@
 "use client";
 
-import { useState } from "react";
-import styled from "styled-components";
-import { useAppSelector } from "@/lib/hooks";
+import { useState, useEffect } from "react";
+import styled, { keyframes } from "styled-components";
+import { useAppDispatch, useAppSelector } from "@/lib/hooks";
+import {
+  loadFolders,
+  createFolder,
+  seedFolderProfile,
+  removeFolder,
+  updateFolder,
+  type FolderType,
+} from "@/lib/features/fileSlice";
 
-type CustomTag = {
-  id: string;
+const PRESET_ICONS = ["📁", "💼", "💻", "📄", "📊", "🎨", "🔐", "📧", "🏥", "⚖️", "📚", "🚀", "🏷️", "📝", "🧾", "🎵"];
+const PRESET_COLORS = ["#1b6f5c", "#245c99", "#7c3aed", "#dc2626", "#d97706", "#0891b2", "#db2777", "#16a34a", "#64748b", "#a16207"];
+
+const PROFILES = [
+  { id: "developer", label: "👨‍💻 Sviluppatore", desc: "Lavoro, Codice (Java/Python/JS), Note, Corsi, Progetti" },
+  { id: "designer", label: "🎨 Designer", desc: "Progetti Design, Brief, Risorse, Ispirazione" },
+  { id: "student", label: "🎓 Studente", desc: "Appunti, Guide, Esercizi, Relazioni, Personale" },
+  { id: "business", label: "📊 Business", desc: "Fatture, Contratti, Report, Comunicazioni, HR" },
+  { id: "default", label: "📂 Generico", desc: "Documenti, Personale, Lavoro, Note" },
+];
+
+type FormState = {
   name: string;
-  color: string;
+  fullPath: string;
+  parentPath: string;
   description: string;
-  influenceAI: boolean;
-  createdAt: string;
+  semanticRules: string;
+  icon: string;
+  color: string;
+  autoTags: string;
 };
 
-const PRESET_COLORS = [
-  "#1b6f5c", "#245c99", "#db2777", "#d97706",
-  "#7c3aed", "#dc2626", "#0891b2", "#64748b",
-];
+const emptyForm: FormState = {
+  name: "",
+  fullPath: "",
+  parentPath: "",
+  description: "",
+  semanticRules: "",
+  icon: "📁",
+  color: "#1b6f5c",
+  autoTags: "",
+};
 
-const DEFAULT_TAGS: CustomTag[] = [
-  { id: "1", name: "urgente", color: "#dc2626", description: "Documenti urgenti", influenceAI: true, createdAt: new Date().toISOString() },
-  { id: "2", name: "archivio", color: "#64748b", description: "Da archiviare", influenceAI: false, createdAt: new Date().toISOString() },
-  { id: "3", name: "da-firmare", color: "#d97706", description: "Richiede firma", influenceAI: true, createdAt: new Date().toISOString() },
-];
+export default function TypeManagementPage() {
+  const dispatch = useAppDispatch();
+  const { folders, foldersStatus } = useAppSelector((s) => s.files);
 
-export default function TagManagementPage() {
-  const { files } = useAppSelector((s) => s.files);
-  const [tags, setTags] = useState<CustomTag[]>(DEFAULT_TAGS);
   const [showForm, setShowForm] = useState(false);
-  const [editingTag, setEditingTag] = useState<CustomTag | null>(null);
-  const [form, setForm] = useState({ name: "", color: PRESET_COLORS[0], description: "", influenceAI: true });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [showSeeding, setShowSeeding] = useState(false);
+  const [seedingProfile, setSeedingProfile] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    if (!form.name.trim()) return;
-    const normalized = form.name.trim().toLowerCase().replace(/\s+/g, "-");
-
-    if (editingTag) {
-      setTags((prev) =>
-        prev.map((t) =>
-          t.id === editingTag.id
-            ? { ...t, name: normalized, color: form.color, description: form.description, influenceAI: form.influenceAI }
-            : t
-        )
-      );
-    } else {
-      const newTag: CustomTag = {
-        id: Date.now().toString(),
-        name: normalized,
-        color: form.color,
-        description: form.description,
-        influenceAI: form.influenceAI,
-        createdAt: new Date().toISOString(),
-      };
-      setTags((prev) => [newTag, ...prev]);
+  useEffect(() => {
+    if (!folders.length) {
+      dispatch(loadFolders());
     }
+  }, [dispatch, folders.length]);
 
-    setForm({ name: "", color: PRESET_COLORS[0], description: "", influenceAI: true });
-    setShowForm(false);
-    setEditingTag(null);
+  const handleSave = async () => {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    try {
+      const autoTags = form.autoTags
+        .split(",")
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+
+      const fullPath = form.fullPath.trim() || (
+        form.parentPath ? `${form.parentPath}/${form.name.trim()}` : form.name.trim()
+      );
+
+      if (editingId) {
+        const response = await fetch(`/api/folders/${editingId}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            fullPath,
+            parentPath: form.parentPath || undefined,
+            description: form.description,
+            semanticRules: form.semanticRules,
+            icon: form.icon,
+            color: form.color,
+            autoTags,
+            autoUpdateType: true,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Errore aggiornamento cartella.");
+        }
+
+        const updatedFolder = (await response.json()) as FolderType;
+        dispatch(updateFolder(updatedFolder));
+      } else {
+        await dispatch(createFolder({
+          name: form.name.trim(),
+          fullPath,
+          parentPath: form.parentPath || undefined,
+          description: form.description,
+          semanticRules: form.semanticRules,
+          icon: form.icon,
+          color: form.color,
+          autoTags,
+          autoUpdateType: true,
+        })).unwrap();
+      }
+
+      setForm(emptyForm);
+      setShowForm(false);
+      setEditingId(null);
+    } catch {
+      // error handled by redux
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleEdit = (tag: CustomTag) => {
-    setEditingTag(tag);
-    setForm({ name: tag.name, color: tag.color, description: tag.description, influenceAI: tag.influenceAI });
+  const handleSeedProfile = async (profileId: string) => {
+    setSeedingProfile(profileId);
+    try {
+      await dispatch(seedFolderProfile(profileId)).unwrap();
+      setShowSeeding(false);
+    } finally {
+      setSeedingProfile(null);
+    }
+  };
+
+  const handleDelete = async (folder: FolderType) => {
+    if (folder.system) {
+      alert("Non è possibile eliminare cartelle di sistema.");
+      return;
+    }
+    if (!confirm(`Eliminare la cartella "${folder.fullPath}"?`)) return;
+    await fetch(`/api/folders/${folder.id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    dispatch(removeFolder(folder.id));
+  };
+
+  const handleEdit = (folder: FolderType) => {
+    setEditingId(folder.id);
+    setForm({
+      name: folder.name,
+      fullPath: folder.fullPath,
+      parentPath: folder.parentPath ?? "",
+      description: folder.description ?? "",
+      semanticRules: folder.semanticRules ?? "",
+      icon: folder.icon,
+      color: folder.color,
+      autoTags: (folder.autoTags ?? []).join(", "),
+    });
     setShowForm(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm("Eliminare questo tag?")) {
-      setTags((prev) => prev.filter((t) => t.id !== id));
-    }
-  };
+  const filtered = folders.filter((f) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      f.fullPath.toLowerCase().includes(q) ||
+      (f.description ?? "").toLowerCase().includes(q)
+    );
+  });
 
-  const handleCancel = () => {
-    setShowForm(false);
-    setEditingTag(null);
-    setForm({ name: "", color: PRESET_COLORS[0], description: "", influenceAI: true });
-  };
-
-  const tagUsage = (tagName: string) =>
-    files.filter((f) => f.tags.includes(tagName)).length;
-
-  const filteredTags = tags.filter(
-    (t) => !search || t.name.includes(search.toLowerCase()) || t.description.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const allTagsInUse = Array.from(
-    new Set(files.flatMap((f) => f.tags))
-  ).filter((t) => !tags.find((ct) => ct.name === t));
+  // Raggruppa per root
+  const rootFolders = filtered.filter((f) => f.depth === 0);
+  const childrenOf = (path: string) => filtered.filter((f) => f.parentPath === path);
 
   return (
     <PageContainer>
+      {/* HEADER */}
       <Header>
         <TitleRow>
-          <PageTitle>🏷️ Gestione Tag</PageTitle>
-          <AddButton onClick={() => { setShowForm(true); setEditingTag(null); }}>
-            + Nuovo tag
-          </AddButton>
+          <PageTitle>🗂️ Tipi e Cartelle</PageTitle>
+          <Actions>
+            <SecondaryBtn onClick={() => setShowSeeding(true)}>
+              ✨ Usa profilo
+            </SecondaryBtn>
+            <PrimaryBtn onClick={() => { setShowForm(true); setEditingId(null); setForm(emptyForm); }}>
+              + Nuova cartella
+            </PrimaryBtn>
+          </Actions>
         </TitleRow>
         <PageDesc>
-          Crea e gestisci tag personalizzati. I tag con &quot;influenza AI&quot; attiva vengono
-          considerati dal modello per migliorare la classificazione futura.
+          Le cartelle in DocuMind sono <strong>tipi semantici</strong>. La loro descrizione viene usata
+          dall&apos;AI per classificare automaticamente i documenti. Più la descrizione è dettagliata, meglio l&apos;AI classifica.
         </PageDesc>
       </Header>
 
+      {/* SEEDING MODAL */}
+      {showSeeding && (
+        <ModalOverlay onClick={(e) => e.target === e.currentTarget && setShowSeeding(false)}>
+          <SeedModal>
+            <SeedTitle>✨ Crea struttura da profilo</SeedTitle>
+            <SeedDesc>
+              Scegli un profilo per creare automaticamente la struttura di cartelle ottimizzata con
+              le descrizioni semantiche già configurate per l&apos;AI.
+            </SeedDesc>
+            <ProfileGrid>
+              {PROFILES.map((p) => (
+                <ProfileCard
+                  key={p.id}
+                  onClick={() => handleSeedProfile(p.id)}
+                  $loading={seedingProfile === p.id}
+                >
+                  <ProfileLabel>{p.label}</ProfileLabel>
+                  <ProfileDesc>{p.desc}</ProfileDesc>
+                  {seedingProfile === p.id && <ProfileSpinner />}
+                </ProfileCard>
+              ))}
+            </ProfileGrid>
+            <SeedClose onClick={() => setShowSeeding(false)}>Annulla</SeedClose>
+          </SeedModal>
+        </ModalOverlay>
+      )}
+
+      {/* CREATE/EDIT FORM */}
       {showForm && (
         <FormCard>
-          <FormTitle>{editingTag ? "✏️ Modifica tag" : "➕ Nuovo tag"}</FormTitle>
+          <FormTitle>{editingId ? "✏️ Modifica cartella" : "➕ Nuova cartella / tipo"}</FormTitle>
+
           <FormGrid>
             <FormGroup>
-              <FormLabel>Nome tag *</FormLabel>
+              <FormLabel>Nome *</FormLabel>
               <FormInput
-                placeholder="es: importante, 2024, cliente-rossi"
+                placeholder="es: Fatture, Java, Note personali"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                onKeyDown={(e) => e.key === "Enter" && handleSave()}
               />
-              <FormHint>Sarà convertito in minuscolo con trattini (es: mio-tag)</FormHint>
             </FormGroup>
 
             <FormGroup>
-              <FormLabel>Descrizione</FormLabel>
-              <FormInput
-                placeholder="A cosa serve questo tag?"
+              <FormLabel>Percorso padre (opzionale)</FormLabel>
+              <FormSelect
+                value={form.parentPath}
+                onChange={(e) => setForm((f) => ({ ...f, parentPath: e.target.value }))}
+              >
+                <option value="">-- Cartella radice --</option>
+                {folders
+                  .filter((f) => !f.system && f.depth < 3)
+                  .map((f) => (
+                    <option key={f.id} value={f.fullPath}>{f.fullPath}</option>
+                  ))}
+              </FormSelect>
+            </FormGroup>
+
+            <FormGroup $full>
+              <FormLabel>
+                📝 Descrizione semantica — <Hint>usata dall&apos;AI per classificare i file</Hint>
+              </FormLabel>
+              <FormTextarea
+                rows={3}
+                placeholder='es: "Fatture commerciali con importi IVA, partita IVA, numero fattura. Include note di credito e ricevute B2B."'
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
+              <HintText>
+                💡 Più dettagliata è la descrizione, meglio l&apos;AI classificherà i file in questa cartella.
+                Includi: tipo di documenti, caratteristiche specifiche, esempi.
+              </HintText>
             </FormGroup>
 
             <FormGroup $full>
-              <FormLabel>Colore</FormLabel>
-              <ColorPicker>
-                {PRESET_COLORS.map((color) => (
-                  <ColorDot
-                    key={color}
-                    $color={color}
-                    $selected={form.color === color}
-                    onClick={() => setForm((f) => ({ ...f, color }))}
-                  />
-                ))}
-                <CustomColorInput
-                  type="color"
-                  value={form.color}
-                  onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
-                  title="Colore personalizzato"
-                />
-              </ColorPicker>
+              <FormLabel>
+                🔧 Regole semantiche aggiuntive — <Hint>opzionale, vincoli per l&apos;AI</Hint>
+              </FormLabel>
+              <FormTextarea
+                rows={2}
+                placeholder='es: "Esclude fatture personali. Solo documenti B2B. Formato PDF con intestazione aziendale."'
+                value={form.semanticRules}
+                onChange={(e) => setForm((f) => ({ ...f, semanticRules: e.target.value }))}
+              />
             </FormGroup>
 
-            <FormGroup $full>
-              <ToggleRow>
-                <div>
-                  <FormLabel style={{ margin: 0 }}>🤖 Influenza classificazione AI</FormLabel>
-                  <FormHint>Il modello terrà conto di questo tag quando classifica i documenti</FormHint>
-                </div>
-                <Toggle
-                  $active={form.influenceAI}
-                  onClick={() => setForm((f) => ({ ...f, influenceAI: !f.influenceAI }))}
-                >
-                  <ToggleKnob $active={form.influenceAI} />
-                </Toggle>
-              </ToggleRow>
+            <FormGroup>
+              <FormLabel>🏷️ Tag automatici</FormLabel>
+              <FormInput
+                placeholder="es: fattura, lavoro, 2024 (separati da virgola)"
+                value={form.autoTags}
+                onChange={(e) => setForm((f) => ({ ...f, autoTags: e.target.value }))}
+              />
+              <HintText>Assegnati automaticamente quando un file viene spostato qui.</HintText>
+            </FormGroup>
+
+            <FormGroup>
+              <FormLabel>Icona e colore</FormLabel>
+              <IconColorRow>
+                <IconGrid>
+                  {PRESET_ICONS.map((icon) => (
+                    <IconBtn
+                      key={icon}
+                      $selected={form.icon === icon}
+                      onClick={() => setForm((f) => ({ ...f, icon }))}
+                    >
+                      {icon}
+                    </IconBtn>
+                  ))}
+                </IconGrid>
+                <ColorGrid>
+                  {PRESET_COLORS.map((color) => (
+                    <ColorDot
+                      key={color}
+                      $color={color}
+                      $selected={form.color === color}
+                      onClick={() => setForm((f) => ({ ...f, color }))}
+                    />
+                  ))}
+                </ColorGrid>
+              </IconColorRow>
             </FormGroup>
           </FormGrid>
 
           {form.name && (
-            <PreviewRow>
-              <span>Anteprima:</span>
-              <TagPreview $color={form.color}>
-                {form.name.trim().toLowerCase().replace(/\s+/g, "-") || "tag"}
-              </TagPreview>
-            </PreviewRow>
+            <Preview>
+              <FolderPreviewDot $color={form.color}>{form.icon}</FolderPreviewDot>
+              <PreviewPath>
+                {form.parentPath ? `${form.parentPath}/` : ""}{form.name}
+              </PreviewPath>
+            </Preview>
           )}
 
           <FormActions>
-            <CancelBtn onClick={handleCancel}>Annulla</CancelBtn>
-            <SaveBtn onClick={handleSave} disabled={!form.name.trim()}>
-              {editingTag ? "Salva modifiche" : "Crea tag"}
+            <CancelBtn onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }}>
+              Annulla
+            </CancelBtn>
+            <SaveBtn onClick={handleSave} disabled={!form.name.trim() || saving}>
+              {saving ? "Salvataggio..." : editingId ? "Salva modifiche" : "Crea cartella"}
             </SaveBtn>
           </FormActions>
         </FormCard>
       )}
 
+      {/* SEARCH */}
       <SearchRow>
         <SearchInput
-          placeholder="🔍 Cerca tag..."
+          placeholder="🔍 Cerca cartelle..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <CountLabel>{filteredTags.length} tag personalizzati</CountLabel>
+        <CountLabel>{filtered.length} cartelle</CountLabel>
       </SearchRow>
 
-      <SectionTitle>Tag personalizzati</SectionTitle>
-      {filteredTags.length === 0 ? (
+      {/* FOLDER TREE */}
+      {foldersStatus === "loading" ? (
+        <EmptyState><EmptyIcon>⏳</EmptyIcon><EmptyText>Caricamento...</EmptyText></EmptyState>
+      ) : filtered.length === 0 ? (
         <EmptyState>
-          <EmptyIcon>🏷️</EmptyIcon>
+          <EmptyIcon>🗂️</EmptyIcon>
           <EmptyText>
-            {search ? `Nessun tag trovato per "${search}"` : "Nessun tag ancora. Creane uno!"}
+            {search ? `Nessuna cartella trovata per "${search}"` : "Nessuna cartella. Creane una o usa un profilo!"}
           </EmptyText>
         </EmptyState>
       ) : (
-        <TagsGrid>
-          {filteredTags.map((tag) => {
-            const usage = tagUsage(tag.name);
-            return (
-              <TagCard key={tag.id}>
-                <TagCardHeader>
-                  <TagBadge $color={tag.color}>{tag.name}</TagBadge>
-                  <TagActions>
-                    <ActionBtn onClick={() => handleEdit(tag)} title="Modifica">✏️</ActionBtn>
-                    <ActionBtn onClick={() => handleDelete(tag.id)} title="Elimina" $danger>🗑️</ActionBtn>
-                  </TagActions>
-                </TagCardHeader>
-
-                {tag.description && <TagDesc>{tag.description}</TagDesc>}
-
-                <TagMeta>
-                  <MetaItem>
-                    <MetaIcon>📁</MetaIcon>
-                    <MetaVal>{usage} {usage === 1 ? "file" : "file"}</MetaVal>
-                  </MetaItem>
-                  <MetaItem>
-                    <MetaIcon>🤖</MetaIcon>
-                    <MetaVal $ok={tag.influenceAI}>
-                      {tag.influenceAI ? "Influenza AI" : "Solo manuale"}
-                    </MetaVal>
-                  </MetaItem>
-                  <MetaItem>
-                    <MetaIcon>📅</MetaIcon>
-                    <MetaVal>{new Date(tag.createdAt).toLocaleDateString("it-IT")}</MetaVal>
-                  </MetaItem>
-                </TagMeta>
-              </TagCard>
-            );
-          })}
-        </TagsGrid>
-      )}
-
-      {allTagsInUse.length > 0 && (
-        <>
-          <SectionTitle style={{ marginTop: 32 }}>
-            Tag generati automaticamente dall&apos;AI
-            <AutoTagNote>Non modificabili — assegnati dalla classificazione</AutoTagNote>
-          </SectionTitle>
-          <AutoTagsRow>
-            {allTagsInUse.map((tag) => (
-              <AutoTag key={tag}>
-                {tag}
-                <AutoTagCount>{tagUsage(tag)}</AutoTagCount>
-              </AutoTag>
-            ))}
-          </AutoTagsRow>
-        </>
+        <FolderTree>
+          {rootFolders.map((folder) => (
+            <FolderTreeItem
+              key={folder.id}
+              folder={folder}
+              children_={childrenOf(folder.fullPath)}
+              allFolders={filtered}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              expanded={expandedId}
+              onToggle={setExpandedId}
+            />
+          ))}
+        </FolderTree>
       )}
     </PageContainer>
   );
 }
 
-const PageContainer = styled.div`
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 32px 24px;
-`;
+// ============================================================
+// FOLDER TREE ITEM
+// ============================================================
+
+function FolderTreeItem({
+  folder,
+  children_,
+  allFolders,
+  onEdit,
+  onDelete,
+  expanded,
+  onToggle,
+}: {
+  folder: FolderType;
+  children_: FolderType[];
+  allFolders: FolderType[];
+  onEdit: (f: FolderType) => void;
+  onDelete: (f: FolderType) => void;
+  expanded: number | null;
+  onToggle: (id: number | null) => void;
+}) {
+  const isExpanded = expanded === folder.id;
+  const hasChildren = children_.length > 0;
+
+  return (
+    <TreeItem>
+      <TreeRow $depth={folder.depth}>
+        <TreeLeft onClick={() => onToggle(isExpanded ? null : folder.id)}>
+          <FolderIcon $color={folder.color}>{folder.icon}</FolderIcon>
+          <TreeInfo>
+            <TreeName>{folder.fullPath}</TreeName>
+            {folder.description && (
+              <TreeDesc>{folder.description.slice(0, 100)}{folder.description.length > 100 ? "…" : ""}</TreeDesc>
+            )}
+          </TreeInfo>
+          {hasChildren && (
+            <Chevron $open={isExpanded}>{isExpanded ? "▾" : "▸"}</Chevron>
+          )}
+          {folder.system && <SystemBadge>sistema</SystemBadge>}
+        </TreeLeft>
+        <TreeActions>
+          {!folder.system && (
+            <>
+              <ActionBtn onClick={() => onEdit(folder)}>✏️</ActionBtn>
+              <ActionBtn $danger onClick={() => onDelete(folder)}>🗑️</ActionBtn>
+            </>
+          )}
+        </TreeActions>
+      </TreeRow>
+
+      {isExpanded && folder.description && (
+        <ExpandedDetail $depth={folder.depth}>
+          <DetailSection>
+            <DetailLabel>📝 Descrizione semantica (usata dall&apos;AI):</DetailLabel>
+            <DetailText>{folder.description}</DetailText>
+          </DetailSection>
+          {folder.semanticRules && (
+            <DetailSection>
+              <DetailLabel>🔧 Regole semantiche:</DetailLabel>
+              <DetailText>{folder.semanticRules}</DetailText>
+            </DetailSection>
+          )}
+          {folder.autoTags && folder.autoTags.length > 0 && (
+            <DetailSection>
+              <DetailLabel>🏷️ Tag automatici:</DetailLabel>
+              <TagsRow>
+                {folder.autoTags.map((t) => <Tag key={t}>{t}</Tag>)}
+              </TagsRow>
+            </DetailSection>
+          )}
+        </ExpandedDetail>
+      )}
+
+      {hasChildren && isExpanded && (
+        <ChildrenContainer>
+          {children_.map((child) => (
+            <FolderTreeItem
+              key={child.id}
+              folder={child}
+              children_={allFolders.filter((f) => f.parentPath === child.fullPath)}
+              allFolders={allFolders}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              expanded={expanded}
+              onToggle={onToggle}
+            />
+          ))}
+        </ChildrenContainer>
+      )}
+    </TreeItem>
+  );
+}
+
+// ============================================================
+// STYLES
+// ============================================================
+
+const fadeIn = keyframes`from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); }`;
+const spin = keyframes`from { transform: rotate(0deg); } to { transform: rotate(360deg); }`;
+
+const PageContainer = styled.div`max-width: 900px; margin: 0 auto; padding: 32px 24px;`;
 
 const Header = styled.div`margin-bottom: 28px;`;
-
-const TitleRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  gap: 12px;
-`;
-
+const TitleRow = styled.div`display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 12px;`;
 const PageTitle = styled.h1`font-size: 1.6rem; font-weight: 800; color: #113f36; margin: 0;`;
+const PageDesc = styled.p`color: #555; font-size: 0.9rem; line-height: 1.6; margin: 0;`;
 
-const PageDesc = styled.p`color: #666; font-size: 0.92rem; margin: 0; line-height: 1.6;`;
+const Actions = styled.div`display: flex; gap: 8px;`;
 
-const AddButton = styled.button`
+const PrimaryBtn = styled.button`
   padding: 10px 20px;
-  background: linear-gradient(135deg, #1b6f5c 0%, #245c99 100%);
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-weight: 700;
-  font-size: 0.9rem;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: opacity 0.2s;
-
+  background: linear-gradient(135deg, #1b6f5c, #245c99);
+  color: #fff; border: none; border-radius: 10px;
+  font-weight: 700; font-size: 0.9rem; cursor: pointer;
   &:hover { opacity: 0.9; }
 `;
 
-const FormCard = styled.div`
-  background: #fff;
-  border: 1px solid #d4ece5;
-  border-radius: 16px;
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: 0 4px 16px rgba(27,111,92,0.07);
-`;
-
-const FormTitle = styled.h3`font-size: 1rem; font-weight: 700; color: #1a3a30; margin: 0 0 18px;`;
-
-const FormGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-
-  @media (max-width: 600px) { grid-template-columns: 1fr; }
-`;
-
-const FormGroup = styled.div<{ $full?: boolean }>`
-  ${({ $full }) => $full && "grid-column: 1 / -1;"}
-`;
-
-const FormLabel = styled.label`
-  display: block;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #286052;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-`;
-
-const FormInput = styled.input`
-  width: 100%;
-  border: 1px solid #ccc;
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 0.9rem;
-  outline: none;
-
-  &:focus { border-color: #1b6f5c; box-shadow: 0 0 0 3px rgba(27,111,92,0.1); }
-`;
-
-const FormHint = styled.p`font-size: 0.74rem; color: #aaa; margin: 4px 0 0;`;
-
-const ColorPicker = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap;`;
-
-const ColorDot = styled.div<{ $color: string; $selected: boolean }>`
-  width: 28px; height: 28px;
-  background: ${({ $color }) => $color};
-  border-radius: 50%;
-  cursor: pointer;
-  border: 3px solid ${({ $selected }) => ($selected ? "#1a3a30" : "transparent")};
-  outline: ${({ $selected, $color }) => ($selected ? `2px solid ${$color}` : "none")};
-  outline-offset: 2px;
-  transition: transform 0.15s;
-
-  &:hover { transform: scale(1.1); }
-`;
-
-const CustomColorInput = styled.input`
-  width: 28px; height: 28px;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  padding: 0;
-  overflow: hidden;
-`;
-
-const ToggleRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 16px;
-  background: #f5faf8;
-  border-radius: 12px;
-  border: 1px solid #d4ece5;
-`;
-
-const Toggle = styled.div<{ $active: boolean }>`
-  width: 44px; height: 24px;
-  background: ${({ $active }) => ($active ? "#1b6f5c" : "#ddd")};
-  border-radius: 999px;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.2s;
-  flex-shrink: 0;
-`;
-
-const ToggleKnob = styled.div<{ $active: boolean }>`
-  width: 18px; height: 18px;
-  background: #fff;
-  border-radius: 50%;
-  position: absolute;
-  top: 3px;
-  left: ${({ $active }) => ($active ? "23px" : "3px")};
-  transition: left 0.2s;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-`;
-
-const PreviewRow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 14px 0 0;
-  font-size: 0.84rem;
-  color: #888;
-`;
-
-const TagPreview = styled.span<{ $color: string }>`
-  background: ${({ $color }) => `${$color}18`};
-  color: ${({ $color }) => $color};
-  border: 1px solid ${({ $color }) => `${$color}50`};
-  border-radius: 999px;
-  padding: 3px 12px;
-  font-size: 0.82rem;
-  font-weight: 700;
-`;
-
-const FormActions = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid #eee;
-`;
-
-const CancelBtn = styled.button`
-  padding: 9px 18px;
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 10px;
-  cursor: pointer;
-  color: #666;
-
+const SecondaryBtn = styled.button`
+  padding: 10px 16px;
+  border: 1px solid #d0ddd9;
+  background: #fff; color: #444; border-radius: 10px;
+  font-size: 0.88rem; cursor: pointer;
   &:hover { background: #f5f5f5; }
 `;
 
-const SaveBtn = styled.button`
-  padding: 9px 20px;
-  background: linear-gradient(135deg, #1b6f5c 0%, #245c99 100%);
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-weight: 700;
-  cursor: pointer;
+const Hint = styled.span`font-size: 0.74rem; font-weight: 400; color: #8b5cf6;`;
+const HintText = styled.p`font-size: 0.74rem; color: #8b5cf6; margin: 4px 0 0; line-height: 1.4;`;
 
-  &:hover:not(:disabled) { opacity: 0.9; }
-  &:disabled { opacity: 0.45; cursor: not-allowed; }
+const FormCard = styled.div`
+  background: #fff; border: 1px solid #d4ece5; border-radius: 16px;
+  padding: 24px; margin-bottom: 24px;
+  box-shadow: 0 4px 16px rgba(27,111,92,0.07);
+  animation: ${fadeIn} 0.2s ease;
 `;
 
-const SearchRow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+const FormTitle = styled.h3`font-size: 1rem; font-weight: 700; color: #1a3a30; margin: 0 0 18px;`;
+const FormGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 16px; @media(max-width:600px){grid-template-columns:1fr;}`;
+const FormGroup = styled.div<{ $full?: boolean }>`${({ $full }) => $full && "grid-column: 1 / -1;"}`;
+const FormLabel = styled.label`display: block; font-size: 0.8rem; font-weight: 700; color: #286052; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em;`;
+const FormInput = styled.input`width: 100%; border: 1px solid #ccc; border-radius: 10px; padding: 9px 12px; font-size: 0.9rem; outline: none; &:focus{border-color:#1b6f5c;box-shadow:0 0 0 3px rgba(27,111,92,0.1);}`;
+const FormSelect = styled.select`width: 100%; border: 1px solid #ccc; border-radius: 10px; padding: 9px 12px; font-size: 0.9rem; outline: none; background: #fff; &:focus{border-color:#1b6f5c;}`;
+const FormTextarea = styled.textarea`width: 100%; border: 1px solid #ccc; border-radius: 10px; padding: 9px 12px; font-size: 0.88rem; outline: none; resize: vertical; font-family: inherit; &:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,0.1);}`;
+
+const IconColorRow = styled.div`display: flex; gap: 12px; flex-direction: column;`;
+const IconGrid = styled.div`display: flex; flex-wrap: wrap; gap: 6px;`;
+const ColorGrid = styled.div`display: flex; flex-wrap: wrap; gap: 6px;`;
+const IconBtn = styled.button<{ $selected: boolean }>`
+  width: 32px; height: 32px; border-radius: 8px; border: 2px solid ${({ $selected }) => $selected ? "#1b6f5c" : "#e0e0e0"};
+  background: ${({ $selected }) => $selected ? "#f0faf5" : "#fff"}; cursor: pointer; font-size: 1.1rem;
+  &:hover{border-color:#1b6f5c;}
+`;
+const ColorDot = styled.div<{ $color: string; $selected: boolean }>`
+  width: 26px; height: 26px; background: ${({ $color }) => $color}; border-radius: 50%; cursor: pointer;
+  border: 3px solid ${({ $selected }) => $selected ? "#1a3a30" : "transparent"};
+  outline: ${({ $selected, $color }) => $selected ? `2px solid ${$color}` : "none"};
+  outline-offset: 2px;
+  &:hover{transform:scale(1.1);}
 `;
 
-const SearchInput = styled.input`
-  flex: 1;
-  border: 1px solid #d0ddd9;
-  border-radius: 10px;
-  padding: 9px 14px;
-  font-size: 0.9rem;
-  outline: none;
-  background: #fff;
+const Preview = styled.div`display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; background: #f5faf8; border-radius: 10px;`;
+const FolderPreviewDot = styled.span<{ $color: string }>`font-size: 1.4rem; color: ${({ $color }) => $color};`;
+const PreviewPath = styled.span`font-size: 0.88rem; font-weight: 600; color: #1a3a30;`;
 
-  &:focus { border-color: #1b6f5c; box-shadow: 0 0 0 3px rgba(27,111,92,0.1); }
+const FormActions = styled.div`display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #eee;`;
+const CancelBtn = styled.button`padding: 9px 18px; border: 1px solid #ddd; background: #fff; border-radius: 10px; cursor: pointer; color: #666; &:hover{background:#f5f5f5;}`;
+const SaveBtn = styled.button`padding: 9px 20px; background: linear-gradient(135deg,#1b6f5c,#245c99); color:#fff; border:none; border-radius:10px; font-weight:700; cursor:pointer; &:hover:not(:disabled){opacity:0.9;} &:disabled{opacity:0.45;cursor:not-allowed;}`;
+
+const SearchRow = styled.div`display: flex; align-items: center; gap: 12px; margin-bottom: 16px;`;
+const SearchInput = styled.input`flex:1; border:1px solid #d0ddd9; border-radius:10px; padding:9px 14px; font-size:0.9rem; outline:none; background:#fff; &:focus{border-color:#1b6f5c;box-shadow:0 0 0 3px rgba(27,111,92,0.1);}`;
+const CountLabel = styled.span`font-size:0.82rem;color:#888;white-space:nowrap;`;
+
+const FolderTree = styled.div`display: flex; flex-direction: column; gap: 4px;`;
+const TreeItem = styled.div``;
+const TreeRow = styled.div<{ $depth: number }>`
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 10px 14px;
+  padding-left: ${({ $depth }) => 14 + $depth * 20}px;
+  background: #fff; border: 1px solid #e5ede9; border-radius: 12px;
+  cursor: pointer; transition: all 0.15s;
+  &:hover{border-color:#1b6f5c; box-shadow:0 2px 8px rgba(27,111,92,0.08);}
 `;
+const TreeLeft = styled.div`display:flex; align-items:flex-start; gap:10px; flex:1;`;
+const FolderIcon = styled.span<{ $color: string }>`font-size:1.3rem; color:${({ $color }) => $color}; flex-shrink:0; margin-top:1px;`;
+const TreeInfo = styled.div`flex:1; min-width:0;`;
+const TreeName = styled.div`font-weight:700; font-size:0.88rem; color:#1a3a30;`;
+const TreeDesc = styled.div`font-size:0.77rem; color:#888; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;`;
+const Chevron = styled.span<{ $open: boolean }>`font-size:0.9rem; color:#aaa; flex-shrink:0; margin-top:2px; transition:transform 0.2s; transform:${({ $open }) => $open ? "rotate(0)" : "rotate(0)"};`;
+const SystemBadge = styled.span`font-size:0.66rem; background:#f0f0f0; color:#888; border-radius:999px; padding:1px 7px; border:1px solid #ddd; flex-shrink:0;`;
 
-const CountLabel = styled.span`font-size: 0.82rem; color: #888; white-space: nowrap;`;
+const TreeActions = styled.div`display:flex; gap:4px; flex-shrink:0; margin-left:8px;`;
+const ActionBtn = styled.button<{ $danger?: boolean }>`background:none;border:none;cursor:pointer;font-size:0.85rem;padding:3px 5px;opacity:0.5;border-radius:6px;&:hover{opacity:1;background:${({ $danger }) => $danger ? "#fee" : "#f5f5f5"};}`;
 
-const SectionTitle = styled.h2`
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #1a3a30;
-  margin: 0 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+const ExpandedDetail = styled.div<{ $depth: number }>`
+  padding: 12px 14px 12px ${({ $depth }) => 14 + $depth * 20 + 38}px;
+  background: #f9fdf9; border: 1px solid #d4ece5; border-top: none;
+  border-radius: 0 0 12px 12px; margin-top: -4px;
 `;
+const DetailSection = styled.div`margin-bottom: 8px; &:last-child{margin-bottom:0;}`;
+const DetailLabel = styled.div`font-size:0.73rem; font-weight:700; color:#8b5cf6; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:3px;`;
+const DetailText = styled.p`font-size:0.82rem; color:#444; margin:0; line-height:1.5;`;
+const TagsRow = styled.div`display:flex; flex-wrap:wrap; gap:4px;`;
+const Tag = styled.span`background:#f0faf5; color:#1b6f5c; border:1px solid #b8ddd4; border-radius:999px; padding:2px 10px; font-size:0.75rem; font-weight:600;`;
 
-const AutoTagNote = styled.span`
-  font-size: 0.74rem;
-  font-weight: 400;
-  color: #aaa;
+const ChildrenContainer = styled.div`margin-left: 20px; display:flex; flex-direction:column; gap:4px; margin-top:4px;`;
+
+const EmptyState = styled.div`text-align:center; padding:48px 20px; background:#fff; border:1px dashed #d0ddd9; border-radius:14px;`;
+const EmptyIcon = styled.div`font-size:2.5rem; margin-bottom:10px;`;
+const EmptyText = styled.p`color:#888; font-size:0.92rem;`;
+
+// SEEDING MODAL
+const ModalOverlay = styled.div`position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;`;
+const SeedModal = styled.div`background:#fff;border-radius:20px;width:min(100%,580px);padding:32px;box-shadow:0 24px 60px rgba(0,0,0,0.25);animation:${fadeIn} 0.2s ease;`;
+const SeedTitle = styled.h2`font-size:1.3rem;font-weight:800;color:#113f36;margin:0 0 8px;`;
+const SeedDesc = styled.p`color:#666;font-size:0.9rem;line-height:1.5;margin:0 0 20px;`;
+const ProfileGrid = styled.div`display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;`;
+const ProfileCard = styled.div<{ $loading: boolean }>`
+  padding:14px;border:1.5px solid #e0e8e5;border-radius:14px;cursor:pointer;position:relative;
+  transition:all 0.15s; opacity:${({ $loading }) => $loading ? 0.6 : 1};
+  &:hover{border-color:#1b6f5c;background:#f5fdf9;}
 `;
-
-const TagsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-`;
-
-const TagCard = styled.div`
-  background: #fff;
-  border: 1px solid #e5ede9;
-  border-radius: 14px;
-  padding: 16px 18px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
-`;
-
-const TagCardHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-`;
-
-const TagBadge = styled.span<{ $color: string }>`
-  background: ${({ $color }) => `${$color}18`};
-  color: ${({ $color }) => $color};
-  border: 1px solid ${({ $color }) => `${$color}40`};
-  border-radius: 999px;
-  padding: 3px 12px;
-  font-size: 0.82rem;
-  font-weight: 700;
-`;
-
-const TagActions = styled.div`display: flex; gap: 4px;`;
-
-const ActionBtn = styled.button<{ $danger?: boolean }>`
-  background: none; border: none; cursor: pointer;
-  font-size: 0.85rem; padding: 3px 5px;
-  opacity: 0.5; border-radius: 6px;
-
-  &:hover {
-    opacity: 1;
-    background: ${({ $danger }) => ($danger ? "#fee" : "#f5f5f5")};
-  }
-`;
-
-const TagDesc = styled.p`font-size: 0.82rem; color: #666; margin: 0 0 10px;`;
-
-const TagMeta = styled.div`display: flex; gap: 12px; flex-wrap: wrap;`;
-
-const MetaItem = styled.div`display: flex; align-items: center; gap: 4px;`;
-const MetaIcon = styled.span`font-size: 0.8rem;`;
-const MetaVal = styled.span<{ $ok?: boolean }>`
-  font-size: 0.76rem;
-  color: ${({ $ok }) => ($ok === true ? "#1b6f5c" : $ok === false ? "#888" : "#666")};
-`;
-
-const EmptyState = styled.div`
-  text-align: center;
-  padding: 40px;
-  background: #fff;
-  border: 1px dashed #d0ddd9;
-  border-radius: 14px;
-`;
-
-const EmptyIcon = styled.div`font-size: 2.5rem; margin-bottom: 10px;`;
-const EmptyText = styled.p`color: #888; font-size: 0.92rem;`;
-
-const AutoTagsRow = styled.div`display: flex; flex-wrap: wrap; gap: 8px;`;
-
-const AutoTag = styled.span`
-  background: #f0f0f0;
-  color: #555;
-  border: 1px solid #ddd;
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 0.8rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-`;
-
-const AutoTagCount = styled.span`
-  background: #ddd;
-  border-radius: 999px;
-  padding: 0 6px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #555;
-`;
+const ProfileLabel = styled.div`font-weight:700;font-size:0.9rem;color:#1a3a30;margin-bottom:4px;`;
+const ProfileDesc = styled.div`font-size:0.76rem;color:#777;line-height:1.4;`;
+const ProfileSpinner = styled.div`width:16px;height:16px;border:2px solid #d0ddd9;border-top-color:#1b6f5c;border-radius:50%;animation:${spin} 0.7s linear infinite;position:absolute;top:10px;right:10px;`;
+const SeedClose = styled.button`display:block;width:100%;padding:11px;border:1px solid #ddd;background:#fff;border-radius:10px;cursor:pointer;color:#666;&:hover{background:#f5f5f5;}`;

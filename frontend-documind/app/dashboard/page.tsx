@@ -1,123 +1,146 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import styled from "styled-components";
+import styled, { keyframes } from "styled-components";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
-import { confirmClassification, clearPendingAnalysis } from "@/lib/features/fileSlice";
-import UploadZone from "@/lib/components/UploadZone";
-import ClassificationResult from "@/lib/components/ClassificationResult";
+import {
+  confirmClassification,
+  clearPendingAnalysis,
+  loadFolders,
+  createFolder,
+  uploadAndAnalyze,
+  addFileWithoutAnalysis,
+} from "@/lib/features/fileSlice";
 import ConfirmationPopup from "@/lib/components/ConfirmationPopup";
 import PrivacyConsentModal from "@/lib/components/PrivacyConsentModal";
 import OnboardingModal from "@/lib/components/OnboardingModal";
-
-type FilterType = "all" | "classified" | "confirmation_required" | "low_confidence";
-type SortType = "newest" | "oldest" | "name";
-
-const FOLDER_COLORS: Record<string, string> = {
-  Finance: "#16a34a",
-  Finanza: "#16a34a",
-  Legal: "#7c3aed",
-  Legale: "#7c3aed",
-  HR: "#0284c7",
-  Personal: "#db2777",
-  Personale: "#db2777",
-  Health: "#dc2626",
-  Salute: "#dc2626",
-  Tech: "#0891b2",
-  Comunicazioni: "#d97706",
-  Business: "#64748b",
-  Dati: "#0891b2",
-  Letteratura: "#a16207",
-  Email: "#d97706",
-  Reports: "#64748b",
-  Literature: "#a16207",
-  Other: "#6b7280",
-  Altro: "#6b7280",
-  Uncategorized: "#9ca3af",
-  "Non classificati": "#9ca3af",
-};
+import { buildOnboardingFolderPayload } from "@/lib/onboardingFolders";
+import TopUtilityBar from "@/lib/components/dashboard/TopUtilityBar";
+import SearchStrip from "@/lib/components/dashboard/SearchStrip";
+import MemoryCircleCard from "@/lib/components/dashboard/MemoryCircleCard";
+import QuickActionsPanel from "@/lib/components/dashboard/QuickActionsPanel";
+import FoldersBoard from "@/lib/components/dashboard/FoldersBoard";
+import { useRouter } from "next/navigation";
+import { logoutState } from "@/lib/features/authSlice";
+import TutorialOverlay from "@/lib/components/TutorialOverlay";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const dispatch = useAppDispatch();
-  const { files, pendingAnalysis, status } = useAppSelector((s) => s.files);
+  const { files, pendingAnalysis, status, folders } = useAppSelector((s) => s.files);
   const user = useAppSelector((s) => s.auth.user);
 
-  const [filter, setFilter] = useState<FilterType>("all");
-  const [sort, setSort] = useState<SortType>("newest");
-  const [search, setSearch] = useState("");
-  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  // Carica le cartelle dell'utente
+  useEffect(() => {
+    dispatch(loadFolders());
+  }, [dispatch]);
 
   useEffect(() => {
-    const privacyAccepted = localStorage.getItem("documind:privacy");
-    const onboardingDone = localStorage.getItem("documind:onboarding");
-    if (!privacyAccepted) {
-      setShowPrivacy(true);
-    } else if (!onboardingDone) {
-      setShowOnboarding(true);
-    }
+    const privacyAccepted = !!localStorage.getItem("documind:privacy");
+    const onboardingDone = !!localStorage.getItem("documind:onboarding");
+
+    setShowPrivacy(!privacyAccepted);
+    setShowOnboarding(privacyAccepted && !onboardingDone);
   }, []);
 
   const handlePrivacyAccept = () => {
     localStorage.setItem("documind:privacy", "1");
     setShowPrivacy(false);
-    const onboardingDone = localStorage.getItem("documind:onboarding");
-    if (!onboardingDone) setShowOnboarding(true);
+    if (!localStorage.getItem("documind:onboarding")) setShowOnboarding(true);
   };
 
-  const handleOnboardingComplete = (folders: string[]) => {
+  const handleOnboardingComplete = async (folders: string[]) => {
+    const selectedFullPaths: string[] = [];
+
+    for (const folderId of folders) {
+      const payload = buildOnboardingFolderPayload(folderId);
+      if (!payload) continue;
+
+      selectedFullPaths.push(payload.fullPath);
+
+      try {
+        const response = await fetch("/api/folders", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok && response.status !== 409) {
+          throw new Error("Errore creazione cartelle iniziali");
+        }
+      } catch {
+        // Non blocca l'onboarding: le cartelle possono essere create anche dopo.
+      }
+    }
+
     localStorage.setItem("documind:onboarding", "1");
-    localStorage.setItem("documind:folders", JSON.stringify(folders));
+    localStorage.setItem("documind:folders", JSON.stringify(selectedFullPaths));
     setShowOnboarding(false);
+    dispatch(loadFolders());
   };
 
-  const handleConfirmClassification = async (confirmedTags: string[], tags: string[]) => {
+  const handleConfirmClassification = async (confirmedTags: string[], additionalTags: string[]) => {
     if (!pendingAnalysis) return;
-    await dispatch(
-      confirmClassification({
-        fileId: pendingAnalysis.file_id,
-        confirmedTags,
-        additionalTags: tags,
+    await dispatch(confirmClassification({
+      fileId: pendingAnalysis.file_id,
+      confirmedTags,
+      additionalTags,
+    }));
+  };
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    });
+    dispatch(logoutState());
+    router.push("/");
+  };
+
+  const handleCreateFolder = async (payload: { name: string; description: string }) => {
+    const result = await dispatch(
+      createFolder({
+        name: payload.name,
+        description: payload.description,
+      })
+    );
+    if (createFolder.rejected.match(result)) {
+      throw new Error("Impossibile creare la cartella.");
+    }
+  };
+
+  const handleAddFile = async (file: File, runAnalysis: boolean) => {
+    if (runAnalysis) {
+      const result = await dispatch(uploadAndAnalyze({ file }));
+      if (uploadAndAnalyze.rejected.match(result)) {
+        throw new Error("Impossibile analizzare il file.");
+      }
+      return;
+    }
+
+    dispatch(
+      addFileWithoutAnalysis({
+        filename: file.name,
+        folder: "Non classificati",
       })
     );
   };
 
-  const folders = Array.from(new Set(files.map((f) => f.folder))).sort();
-
-  const filteredFiles = files
-    .filter((f) => {
-      if (activeFolder && f.folder !== activeFolder) return false;
-      if (filter === "classified" && f.analysisResult.type !== "CLASSIFIED") return false;
-      if (
-        filter === "confirmation_required" &&
-        f.analysisResult.type !== "CONFIRMATION_REQUIRED" &&
-        f.analysisResult.type !== "PARTIAL_CONFIRMATION"
-      ) return false;
-      if (filter === "low_confidence" && f.analysisResult.type !== "LOW_CONFIDENCE") return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return (
-          f.filename.toLowerCase().includes(q) ||
-          f.tags.some((t) => t.includes(q)) ||
-          f.folder.toLowerCase().includes(q)
-        );
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (sort === "newest") return new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime();
-      if (sort === "oldest") return new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime();
-      return a.filename.localeCompare(b.filename);
-    });
+  const totalMemoryGb = 5.64;
+  const usedMemoryGb = Math.min(totalMemoryGb, Math.max(0.08, files.length * 0.12));
 
   const statsClassified = files.filter((f) => f.analysisResult.type === "CLASSIFIED").length;
   const statsPending = files.filter(
-    (f) =>
-      f.analysisResult.type === "CONFIRMATION_REQUIRED" ||
-      f.analysisResult.type === "PARTIAL_CONFIRMATION"
+    (f) => f.analysisResult.type === "CONFIRMATION_REQUIRED" || f.analysisResult.type === "PARTIAL_CONFIRMATION"
   ).length;
   const statsLow = files.filter((f) => f.analysisResult.type === "LOW_CONFIDENCE").length;
+  const statsManual = files.filter((f) => f.userOverride).length;
 
   return (
     <>
@@ -135,368 +158,133 @@ export default function DashboardPage() {
           onDismiss={() => dispatch(clearPendingAnalysis())}
         />
       )}
+      {showTutorial && <TutorialOverlay onClose={() => setShowTutorial(false)} />}
 
       <PageWrapper>
-        <Sidebar>
-          <SidebarHeader>
-            <AppLogo>🧠</AppLogo>
-            <AppName>DocuMind</AppName>
-          </SidebarHeader>
+        <TopUtilityBar
+          userName={user?.name}
+          onLogout={handleLogout}
+          onOpenTutorial={() => setShowTutorial(true)}
+        />
 
-          <UserInfo>
-            <UserAvatar>{(user?.name ?? "U")[0].toUpperCase()}</UserAvatar>
-            <UserMeta>
-              <UserName>{user?.name ?? "Utente"} {user?.surname ?? ""}</UserName>
-              <UserEmail>{user?.email ?? ""}</UserEmail>
-            </UserMeta>
-          </UserInfo>
+        <SearchStrip value={searchTerm} onChange={setSearchTerm} />
 
-          <NavSection>
-            <NavTitle>Vista</NavTitle>
-            <NavItem $active={!activeFolder && filter === "all"} onClick={() => { setActiveFolder(null); setFilter("all"); }}>
-              <span>📁</span> Tutti i file
-              <NavCount>{files.length}</NavCount>
-            </NavItem>
-            <NavItem $active={filter === "classified"} onClick={() => { setActiveFolder(null); setFilter("classified"); }}>
-              <span>✅</span> Classificati
-              <NavCount $color="#1b6f5c">{statsClassified}</NavCount>
-            </NavItem>
-            {statsPending > 0 && (
-              <NavItem $active={filter === "confirmation_required"} $highlight onClick={() => { setActiveFolder(null); setFilter("confirmation_required"); }}>
-                <span>🤔</span> In attesa
-                <NavCount $color="#d97706">{statsPending}</NavCount>
-              </NavItem>
-            )}
-            <NavItem $active={filter === "low_confidence"} onClick={() => { setActiveFolder(null); setFilter("low_confidence"); }}>
-              <span>🗂️</span> Senza categoria
-              <NavCount>{statsLow}</NavCount>
-            </NavItem>
-          </NavSection>
-
-          {folders.length > 0 && (
-            <NavSection>
-              <NavTitle>Cartelle</NavTitle>
-              {folders.map((folder) => (
-                <NavItem
-                  key={folder}
-                  $active={activeFolder === folder}
-                  onClick={() => { setActiveFolder(activeFolder === folder ? null : folder); setFilter("all"); }}
-                >
-                  <FolderDot $color={FOLDER_COLORS[folder] ?? "#888"} />
-                  {folder}
-                  <NavCount>{files.filter((f) => f.folder === folder).length}</NavCount>
-                </NavItem>
-              ))}
-            </NavSection>
-          )}
-        </Sidebar>
-
-        <Main>
-          <TopBar>
-            <PageTitle>
-              {activeFolder ? `📁 ${activeFolder}` : "Archivio Documenti"}
-            </PageTitle>
-            <SearchInput
-              placeholder="🔍 Cerca per nome, tag, cartella..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+        <Grid>
+          <LeftCol>
+            <QuickActionsPanel
+              foldersCount={folders.filter((f) => !f.system).length}
+              onAddFolder={handleCreateFolder}
+              onAddType={() => router.push("/tags")}
+              onAddFile={handleAddFile}
             />
-            <SortSelect value={sort} onChange={(e) => setSort(e.target.value as SortType)}>
-              <option value="newest">Più recenti</option>
-              <option value="oldest">Meno recenti</option>
-              <option value="name">Nome A-Z</option>
-            </SortSelect>
-          </TopBar>
+            <MemoryCircleCard
+              totalGb={totalMemoryGb}
+              usedGb={usedMemoryGb}
+              fileCount={files.length}
+            />
+          </LeftCol>
 
-          <StatsRow>
-            <StatCard>
-              <StatNum>{files.length}</StatNum>
-              <StatLabel>File totali</StatLabel>
-            </StatCard>
-            <StatCard $accent="#1b6f5c">
-              <StatNum>{statsClassified}</StatNum>
-              <StatLabel>Classificati</StatLabel>
-            </StatCard>
+          <RightCol>
+            <FoldersBoard searchTerm={searchTerm} onSearchTermChange={setSearchTerm} />
+          </RightCol>
+        </Grid>
+
+        {status === "loading" && (
+          <AnalyzingBanner>
+            <AnalyzingSpinner />
+            Analisi AI in corso — Classificazione gerarchica a 3 livelli...
+          </AnalyzingBanner>
+        )}
+
+        <StatsRow>
+          <StatCard>
+            <StatNum>{files.length}</StatNum>
+            <StatLabel>File totali</StatLabel>
+          </StatCard>
+          <StatCard $accent="#1b6f5c">
+            <StatNum>{statsClassified}</StatNum>
+            <StatLabel>Classificati AI</StatLabel>
+          </StatCard>
+          {statsPending > 0 && (
             <StatCard $accent="#d97706">
               <StatNum>{statsPending}</StatNum>
               <StatLabel>In attesa</StatLabel>
             </StatCard>
-            <StatCard $accent="#6b7280">
-              <StatNum>{statsLow}</StatNum>
-              <StatLabel>Non classificati</StatLabel>
+          )}
+          <StatCard $accent="#6b7280">
+            <StatNum>{statsLow}</StatNum>
+            <StatLabel>Non classificati</StatLabel>
+          </StatCard>
+          {statsManual > 0 && (
+            <StatCard $accent="#8b5cf6">
+              <StatNum>{statsManual}</StatNum>
+              <StatLabel>Manuale</StatLabel>
             </StatCard>
-          </StatsRow>
-
-          <UploadSection>
-            <SectionHeading>📤 Carica nuovo documento</SectionHeading>
-            <UploadZone />
-          </UploadSection>
-
-          <FilesSection>
-            <FilesHeader>
-              <SectionHeading>
-                {activeFolder ? `📁 ${activeFolder}` : "Tutti i file"}
-                {" "}
-                <FilesCount>({filteredFiles.length})</FilesCount>
-              </SectionHeading>
-            </FilesHeader>
-
-            {filteredFiles.length === 0 ? (
-              <EmptyState>
-                {status === "loading" ? (
-                  <>
-                    <EmptyIcon>⏳</EmptyIcon>
-                    <EmptyText>Analisi in corso...</EmptyText>
-                  </>
-                ) : search ? (
-                  <>
-                    <EmptyIcon>🔍</EmptyIcon>
-                    <EmptyText>Nessun file trovato per &quot;{search}&quot;</EmptyText>
-                  </>
-                ) : (
-                  <>
-                    <EmptyIcon>📭</EmptyIcon>
-                    <EmptyText>Nessun documento ancora. Carica il tuo primo file!</EmptyText>
-                  </>
-                )}
-              </EmptyState>
-            ) : (
-              <FilesGrid>
-                {filteredFiles.map((file) => (
-                  <ClassificationResult key={file.id} file={file} />
-                ))}
-              </FilesGrid>
-            )}
-          </FilesSection>
-        </Main>
+          )}
+        </StatsRow>
       </PageWrapper>
     </>
   );
 }
 
+// ============================================================
+// STYLES
+// ============================================================
+
 const PageWrapper = styled.div`
   display: flex;
-  min-height: 100vh;
-  background: #f4f7f5;
-`;
-
-const Sidebar = styled.aside`
-  width: 260px;
-  flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #e0e8e5;
-  padding: 24px 16px;
-  display: flex;
   flex-direction: column;
-  gap: 6px;
-
-  @media (max-width: 768px) { display: none; }
+  gap: 14px;
+  padding: 8px 0;
 `;
 
-const SidebarHeader = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 6px 16px;
-  border-bottom: 1px solid #eee;
-  margin-bottom: 8px;
-`;
-
-const AppLogo = styled.span`font-size: 1.6rem;`;
-const AppName = styled.span`font-size: 1.2rem; font-weight: 800; color: #113f36;`;
-
-const UserInfo = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 8px 16px;
-  border-bottom: 1px solid #eee;
-  margin-bottom: 8px;
-`;
-
-const UserAvatar = styled.div`
-  width: 36px; height: 36px;
-  background: linear-gradient(135deg, #1b6f5c, #245c99);
-  color: #fff;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 0.9rem;
-  flex-shrink: 0;
-`;
-
-const UserMeta = styled.div`min-width: 0;`;
-const UserName = styled.div`font-weight: 700; font-size: 0.87rem; color: #1a3a30; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
-const UserEmail = styled.div`font-size: 0.74rem; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
-
-const NavSection = styled.div`margin-bottom: 8px;`;
-const NavTitle = styled.div`
-  font-size: 0.68rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #aaa;
-  padding: 8px 8px 4px;
-`;
-
-const NavItem = styled.div<{ $active?: boolean; $highlight?: boolean }>`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 0.88rem;
-  color: ${({ $active }) => ($active ? "#1b6f5c" : "#444")};
-  background: ${({ $active }) => ($active ? "#f0faf5" : "transparent")};
-  font-weight: ${({ $active }) => ($active ? 700 : 400)};
-  transition: all 0.15s;
-  position: relative;
-
-  ${({ $highlight }) =>
-    $highlight &&
-    `
-    &::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 50%;
-      transform: translateY(-50%);
-      width: 3px; height: 60%;
-      background: #d97706;
-      border-radius: 99px;
-    }
-  `}
-
-  &:hover { background: #f5f5f5; color: #1b6f5c; }
-`;
-
-const NavCount = styled.span<{ $color?: string }>`
-  margin-left: auto;
-  font-size: 0.74rem;
-  font-weight: 700;
-  color: ${({ $color }) => $color ?? "#aaa"};
-  background: ${({ $color }) => ($color ? `${$color}18` : "#f0f0f0")};
-  border-radius: 999px;
-  padding: 1px 7px;
-  min-width: 22px;
-  text-align: center;
-`;
-
-const FolderDot = styled.span<{ $color: string }>`
-  width: 8px; height: 8px;
-  background: ${({ $color }) => $color};
-  border-radius: 50%;
-  flex-shrink: 0;
-`;
-
-const Main = styled.main`
-  flex: 1;
-  padding: 28px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-`;
-
-const TopBar = styled.div`
-  display: flex;
-  align-items: center;
+const Grid = styled.div`
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
   gap: 12px;
-  flex-wrap: wrap;
+
+  @media (max-width: 980px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
-const PageTitle = styled.h1`
-  font-size: 1.4rem;
-  font-weight: 800;
-  color: #113f36;
-  margin: 0;
-  flex-shrink: 0;
+const LeftCol = styled.div`
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 12px;
 `;
 
-const SearchInput = styled.input`
-  flex: 1;
-  min-width: 180px;
-  border: 1px solid #d0ddd9;
-  border-radius: 10px;
-  padding: 9px 14px;
-  font-size: 0.9rem;
-  outline: none;
-  background: #fff;
-
-  &:focus { border-color: #1b6f5c; box-shadow: 0 0 0 3px rgba(27,111,92,0.1); }
-`;
-
-const SortSelect = styled.select`
-  border: 1px solid #d0ddd9;
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 0.88rem;
-  outline: none;
-  background: #fff;
-  cursor: pointer;
-`;
+const RightCol = styled.div`min-width: 0;`;
 
 const StatsRow = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 12px;
+  gap: 10px;
 `;
 
 const StatCard = styled.div<{ $accent?: string }>`
-  background: #fff;
-  border: 1px solid #e5ede9;
-  border-radius: 14px;
-  padding: 16px;
-  text-align: center;
+  background: #fff; border: 1px solid #e5ede9;
+  border-radius: 14px; padding: 14px; text-align: center;
   border-left: 4px solid ${({ $accent }) => $accent ?? "#e0e0e0"};
 `;
 
-const StatNum = styled.div`font-size: 1.6rem; font-weight: 800; color: #1a3a30;`;
-const StatLabel = styled.div`font-size: 0.78rem; color: #888; margin-top: 2px;`;
+const StatNum = styled.div`font-size: 1.5rem; font-weight: 800; color: #1a3a30;`;
+const StatLabel = styled.div`font-size: 0.72rem; color: #888; margin-top: 2px;`;
 
-const UploadSection = styled.div`
-  background: #fff;
-  border: 1px solid #e5ede9;
-  border-radius: 16px;
-  padding: 20px 24px;
+const AnalyzingBanner = styled.div`
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 4px; padding: 12px 16px;
+  background: linear-gradient(90deg, #f0faf5, #f5f3ff);
+  border: 1px solid #d4ece5; border-radius: 10px;
+  font-size: 0.88rem; font-weight: 600; color: #1b6f5c;
 `;
 
-const SectionHeading = styled.h2`
-  font-size: 1rem;
-  font-weight: 700;
-  color: #1a3a30;
-  margin: 0 0 14px;
+const spin = keyframes`from{transform:rotate(0)}to{transform:rotate(360deg)}`;
+const AnalyzingSpinner = styled.div`
+  width: 16px; height: 16px;
+  border: 2px solid #d4ece5; border-top-color: #1b6f5c;
+  border-radius: 50%;
+  animation: ${spin} 0.8s linear infinite;
+  flex-shrink: 0;
 `;
 
-const FilesSection = styled.div``;
-
-const FilesHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-`;
-
-const FilesCount = styled.span`
-  font-weight: 400;
-  color: #aaa;
-`;
-
-const FilesGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 14px;
-`;
-
-const EmptyState = styled.div`
-  text-align: center;
-  padding: 60px 20px;
-  background: #fff;
-  border: 1px dashed #d0ddd9;
-  border-radius: 16px;
-`;
-
-const EmptyIcon = styled.div`font-size: 3rem; margin-bottom: 12px;`;
-const EmptyText = styled.p`color: #888; font-size: 0.96rem;`;

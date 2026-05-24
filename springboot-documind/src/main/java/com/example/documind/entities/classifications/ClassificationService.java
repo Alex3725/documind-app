@@ -10,6 +10,8 @@ import com.example.documind.security.tokens.TokenRepository;
 import com.example.documind.security.tokens.TokenService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
@@ -21,9 +23,16 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import com.example.documind.dto.requests.FileCreateRequest;
+import com.example.documind.entities.files.FileService;
+import com.example.documind.dto.responses.FileResponse;
 
 /**
  * ClassificationService — Classificazione gerarchica a 3 livelli.
@@ -45,6 +54,8 @@ import java.util.stream.Collectors;
 @Service
 public class ClassificationService {
 
+    private static final Logger logger = LoggerFactory.getLogger(ClassificationService.class);
+
     private static final double HIGH_THRESHOLD = 0.75;
     private static final double MID_THRESHOLD = 0.45;
     private static final double MIN_SHOW = 0.20;
@@ -62,23 +73,33 @@ public class ClassificationService {
     private final FolderTypeRepository folderTypeRepository;
     private final TokenRepository tokenRepository;
     private final TokenService tokenService;
+    private final FileService fileService;
+
+    @Value("${app.storage.path:user-data/outputs/springboot-files}")
+    private String storagePath;
 
     public ClassificationService(
             FolderTypeRepository folderTypeRepository,
             TokenRepository tokenRepository,
-            TokenService tokenService
+            TokenService tokenService,
+            FileService fileService
     ) {
         this.folderTypeRepository = folderTypeRepository;
         this.tokenRepository = tokenRepository;
         this.tokenService = tokenService;
+        this.fileService = fileService;
     }
 
     // =====================================================
     // ANALIZZA FILE — punto d'ingresso
     // =====================================================
 
-    public AnalysisResult analyzeFile(String authToken, MultipartFile file, String customTagsJson) throws IOException {
+    public AnalysisResult analyzeFile(String authToken, MultipartFile file, String customTagsJson, String clientIp) throws IOException {
         String owner = extractOwner(authToken);
+        // If no authenticated owner, use client IP as owner identifier
+        if (!StringUtils.hasText(owner)) {
+            owner = clientIp != null ? clientIp : "anonymous";
+        }
 
         // Recupera descrizioni cartelle utente per arricchire il prompt AI
         Map<String, String> userTypeDescriptions = buildUserTypeDescriptions(owner);
@@ -98,7 +119,28 @@ public class ClassificationService {
         PythonHierarchicalResponse pythonResult = callPythonHierarchical(file, finalCustomTags);
 
         // Processa il risultato gerarchico
-        return processHierarchicalResult(pythonResult, authToken, file);
+        AnalysisResult result = processHierarchicalResult(pythonResult, authToken, file);
+
+        // Salva file bytes su disco e persisti metadati nel DB (owner = authenticated owner o IP)
+        // Gestione robusto degli errori con logging
+        try {
+            String truncatedToken = truncateTokenForAudit(authToken);
+            var saved = storeFileAndMetadata(owner, clientIp, truncatedToken, file, result, pythonResult);
+            if (saved != null) {
+                result.setSavedFileId(saved.getId());
+                logger.info("File {} successfully persisted with id={}, owner={}, uploaderIp={}", 
+                    file.getOriginalFilename(), saved.getId(), owner, clientIp);
+            }
+        } catch (CustomException ce) {
+            logger.warn("File persistence failed with custom exception for {}: {}", file.getOriginalFilename(), ce.getMessage());
+            throw ce;
+        } catch (Exception e) {
+            logger.error("Unexpected error during file persistence for {}: {}", file.getOriginalFilename(), e.getMessage(), e);
+            throw new CustomException(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+                    "FILE_SAVE_FAILED", "Failed to save file: " + e.getMessage());
+        }
+
+        return result;
     }
 
     // =====================================================
@@ -408,6 +450,63 @@ public class ClassificationService {
         pending.setSuggestedFolder(p.getSuggestedFolder());
         pending.setSummary(p.getSummary());
         return pending;
+    }
+
+    private FileResponse storeFileAndMetadata(String owner, String uploaderIp, String uploaderToken, MultipartFile file, AnalysisResult result, PythonHierarchicalResponse pythonResult) throws Exception {
+        if (file == null || file.isEmpty()) return null;
+
+        byte[] bytes = file.getBytes();
+        Path dir = Paths.get(storagePath);
+        if (!Files.exists(dir)) Files.createDirectories(dir);
+
+        String original = file.getOriginalFilename() != null ? file.getOriginalFilename() : "upload";
+        String saveName = (pythonResult != null && pythonResult.getFileId() != null ? pythonResult.getFileId() + "_" : "") + original;
+        Path target = dir.resolve(saveName);
+        Files.write(target, bytes);
+        logger.debug("File bytes written to disk: {}", target.toAbsolutePath());
+
+        // compute sha-256
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] digest = md.digest(bytes);
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest) sb.append(String.format("%02x", b));
+        String hex = sb.toString();
+
+        // determine tags to persist
+        List<String> tags = new ArrayList<>();
+        if (result.getAssignedTags() != null && !result.getAssignedTags().isEmpty()) {
+            tags.addAll(result.getAssignedTags());
+        } else if (result.getAllTags() != null && !result.getAllTags().isEmpty()) {
+            for (TagEntry t : result.getAllTags()) {
+                if (t != null && t.getName() != null) tags.add(t.getName());
+            }
+        }
+
+        FileCreateRequest req = new FileCreateRequest();
+        req.setName(original);
+        req.setPath(target.toAbsolutePath().toString());
+        req.setMimeType(file.getContentType());
+        req.setSize(file.getSize());
+        req.setHash(hex);
+        req.setTags(tags);
+        // semantic info if available
+        if (result.getHierarchicalClassification() != null) {
+            // no direct mapping here; leave semantic fields null for now
+        }
+
+        try {
+            return fileService.createFileWithOwner(owner, uploaderIp, uploaderToken, req);
+        } catch (CustomException ce) {
+            // rethrow to allow upper level to handle
+            logger.warn("FileService.createFileWithOwner failed: {}", ce.getMessage());
+            throw ce;
+        }
+    }
+
+    private String truncateTokenForAudit(String token) {
+        if (!StringUtils.hasText(token)) return null;
+        // Store only first 50 chars for audit trail (security best practice)
+        return token.length() > 50 ? token.substring(0, 50) : token;
     }
 
     private List<TagEntry> buildConfirmedTagEntries(List<String> names,

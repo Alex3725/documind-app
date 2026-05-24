@@ -5,6 +5,7 @@ import com.example.documind.dto.requests.ConfirmClassificationRequest;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -30,9 +31,17 @@ public class ClassificationController {
     public ResponseEntity<AnalysisResult> analyzeFile(
             @CookieValue(name = "authentication-token", required = false) String token,
             @RequestParam("file") MultipartFile file,
-            @RequestParam(name = "custom_tags_for_analysis", required = false) String customTagsForAnalysis
+            @RequestParam(name = "custom_tags_for_analysis", required = false) String customTagsForAnalysis,
+            HttpServletRequest request
     ) throws IOException {
-        AnalysisResult result = classificationService.analyzeFile(token, file, customTagsForAnalysis);
+        String clientIp = null;
+        String xf = request.getHeader("X-Forwarded-For");
+        if (xf != null && !xf.isBlank()) {
+            clientIp = xf.split(",")[0].trim();
+        } else {
+            clientIp = request.getRemoteAddr();
+        }
+        AnalysisResult result = classificationService.analyzeFile(token, file, customTagsForAnalysis, clientIp);
         return ResponseEntity.ok(result);
     }
 

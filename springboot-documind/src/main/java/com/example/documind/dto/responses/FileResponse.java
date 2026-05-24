@@ -31,6 +31,8 @@ public class FileResponse {
 	private LocalDateTime lastAccess;
 	private LocalDateTime lastModified;
 	private String owner;
+	private String uploaderIp;
+	private String uploaderToken;
 	private boolean compressed;
 	private boolean encrypted;
 }

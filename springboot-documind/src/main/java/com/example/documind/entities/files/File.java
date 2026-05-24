@@ -76,6 +76,12 @@ public class File {
     // 👤 opzionale
     private String owner;
 
+    // 📍 IP dell'upload per audit (separato dall'owner)
+    private String uploaderIp;
+
+    // 🔑 Token dell'uploader (truncated per audit trail)
+    private String uploaderToken;
+
     // ⚙️ flags utili
     private boolean compressed;
     private boolean encrypted;

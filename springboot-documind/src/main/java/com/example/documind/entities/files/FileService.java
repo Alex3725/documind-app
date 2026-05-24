@@ -66,6 +66,30 @@ public class FileService {
 		return fileMapper.toResponse(saved);
 	}
 
+	@Transactional
+    public FileResponse createFileWithOwner(String owner, String uploaderIp, String uploaderToken, FileCreateRequest request) {
+        if (!StringUtils.hasText(owner)) {
+            throw new CustomException(HttpStatus.BAD_REQUEST, "OWNER_REQUIRED", "Owner must be provided when creating file by owner.");
+        }
+        validateCreateRequest(request);
+        if (fileRepository.existsByHash(request.getHash())) {
+            throw new CustomException(HttpStatus.CONFLICT, "FILE_HASH_CONFLICT", "A file with the same hash already exists.");
+        }
+
+        File file = fileMapper.toEntity(request);
+        file.setOwner(owner);
+        file.setUploaderIp(uploaderIp);
+        file.setUploaderToken(uploaderToken);
+
+		LocalDateTime now = LocalDateTime.now();
+		file.setUploadDate(now);
+		file.setLastModified(now);
+		file.setLastAccess(now);
+
+		File saved = fileRepository.save(file);
+		return fileMapper.toResponse(saved);
+	}
+
 	@Transactional(readOnly = true)
 	public List<FileResponse> listFiles(
 			String token,

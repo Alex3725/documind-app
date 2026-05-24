@@ -568,14 +568,15 @@ public class ClassificationService {
                     if (folder == null) {
                         return null;
                     }
-                    if (folder.getAutoTags() != null) {
-                        for (String tag : folder.getAutoTags()) {
-                            if (StringUtils.hasText(tag)) {
-                                return tag.trim();
-                            }
+                    if (!folder.isAutoUpdateType() || folder.getAutoTags() == null) {
+                        return null;
+                    }
+                    for (String tag : folder.getAutoTags()) {
+                        if (StringUtils.hasText(tag)) {
+                            return tag.trim();
                         }
                     }
-                    return StringUtils.hasText(folder.getName()) ? folder.getName().trim() : null;
+                    return null;
                 }
 
                 private String normalizeForMatch(String input) {
@@ -717,6 +718,7 @@ public class ClassificationService {
         FileCreateRequest req = new FileCreateRequest();
         req.setName(original);
         req.setPath(target.toAbsolutePath().toString());
+            req.setFolderPath(StringUtils.hasText(result.getSuggestedFolder()) ? result.getSuggestedFolder() : "Non classificati");
         req.setMimeType(file.getContentType());
         req.setSize(file.getSize());
         req.setHash(hex);

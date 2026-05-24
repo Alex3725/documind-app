@@ -16,6 +16,7 @@ import java.util.Map;
 public class FileCreateRequest {
     private String name;
     private String path;
+    private String folderPath;
     private FileCategory category;
     private FileSubType subType;
     private String mimeType;

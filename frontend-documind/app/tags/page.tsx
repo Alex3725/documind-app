@@ -31,8 +31,6 @@ type FormState = {
   semanticRules: string;
   icon: string;
   color: string;
-  useFolderNameAsTag: boolean;
-  customTagName: string;
   autoTags: string;
 };
 
@@ -44,8 +42,6 @@ const emptyForm: FormState = {
   semanticRules: "",
   icon: "📁",
   color: "#1b6f5c",
-  useFolderNameAsTag: true,
-  customTagName: "",
   autoTags: "",
 };
 
@@ -72,16 +68,13 @@ export default function TypeManagementPage() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      const secondaryAutoTags = form.autoTags
+      const autoTags = form.autoTags
         .split(",")
         .map((t) => t.trim().toLowerCase())
         .filter(Boolean);
 
-      const primaryTag = form.useFolderNameAsTag
-        ? form.name.trim().toLowerCase()
-        : form.customTagName.trim().toLowerCase() || form.name.trim().toLowerCase();
-
-      const autoTags = Array.from(new Set([primaryTag, ...secondaryAutoTags].filter(Boolean)));
+      const uniqueAutoTags = Array.from(new Set(autoTags));
+      const autoUpdateType = uniqueAutoTags.length > 0;
 
       const fullPath = form.fullPath.trim() || (
         form.parentPath ? `${form.parentPath}/${form.name.trim()}` : form.name.trim()
@@ -100,8 +93,8 @@ export default function TypeManagementPage() {
             semanticRules: form.semanticRules,
             icon: form.icon,
             color: form.color,
-            autoTags,
-            autoUpdateType: form.useFolderNameAsTag,
+              autoTags: uniqueAutoTags,
+            autoUpdateType,
           }),
         });
 
@@ -120,8 +113,8 @@ export default function TypeManagementPage() {
           semanticRules: form.semanticRules,
           icon: form.icon,
           color: form.color,
-          autoTags,
-          autoUpdateType: form.useFolderNameAsTag,
+          autoTags: uniqueAutoTags,
+          autoUpdateType,
         })).unwrap();
       }
 
@@ -168,8 +161,6 @@ export default function TypeManagementPage() {
       semanticRules: folder.semanticRules ?? "",
       icon: folder.icon,
       color: folder.color,
-      useFolderNameAsTag: folder.autoUpdateType,
-      customTagName: folder.autoUpdateType ? "" : (folder.autoTags?.[0] ?? folder.name),
       autoTags: (folder.autoTags ?? []).join(", "),
     });
     setShowForm(true);
@@ -280,6 +271,9 @@ export default function TypeManagementPage() {
                 💡 Più dettagliata è la descrizione, meglio l&apos;AI classificherà i file in questa cartella.
                 Includi: tipo di documenti, caratteristiche specifiche, esempi.
               </HintText>
+              <HintText>
+                Puoi richiamare altre cartelle o tag già definiti con <strong>[[folder:Percorso/Cartella]]</strong> oppure <strong>[[tag:nome_tag]]</strong>.
+              </HintText>
             </FormGroup>
 
             <FormGroup $full>
@@ -306,25 +300,8 @@ export default function TypeManagementPage() {
 
             <FormGroup>
               <FormLabel>Comportamento tag primario</FormLabel>
-              <SwitchRow>
-                <SwitchLabel>
-                  <SwitchInput
-                    type="checkbox"
-                    checked={form.useFolderNameAsTag}
-                    onChange={(e) => setForm((f) => ({ ...f, useFolderNameAsTag: e.target.checked }))}
-                  />
-                  <span>Usa nome cartella come tag</span>
-                </SwitchLabel>
-              </SwitchRow>
-              {!form.useFolderNameAsTag && (
-                <FormInput
-                  placeholder="Nome tag personalizzato"
-                  value={form.customTagName}
-                  onChange={(e) => setForm((f) => ({ ...f, customTagName: e.target.value }))}
-                />
-              )}
               <HintText>
-                Se disattivato, il tag primario sarà quello personalizzato e la descrizione semantica guiderà l&apos;assegnazione.
+                Nessun tag primario viene creato automaticamente. Se vuoi più etichette, inseriscile qui separate da virgola.
               </HintText>
             </FormGroup>
 

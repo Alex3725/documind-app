@@ -6,9 +6,18 @@ import FileExplorer from "@/lib/components/FileExplorer";
 type Props = {
   searchTerm: string;
   onSearchTermChange: (value: string) => void;
+  currentFolderPath?: string;
+  onOpenFolder: (fullPath: string) => void;
 };
 
-export default function FoldersBoard({ searchTerm, onSearchTermChange }: Props) {
+export default function FoldersBoard({
+  searchTerm,
+  onSearchTermChange,
+  currentFolderPath,
+  onOpenFolder,
+}: Props) {
+  const displayPath = currentFolderPath ? `main / workspace / ${currentFolderPath}` : "main / workspace / folders";
+
   return (
     <Board>
       <HeaderRow>
@@ -16,13 +25,15 @@ export default function FoldersBoard({ searchTerm, onSearchTermChange }: Props) 
           <HeaderLabel>Vista contenuti</HeaderLabel>
           <HeaderMeta>righe riusabili per file e cartelle</HeaderMeta>
         </HeaderCopy>
-        <HeaderPath>main / workspace / folders</HeaderPath>
+        <HeaderPath>{displayPath}</HeaderPath>
       </HeaderRow>
       <ExplorerWrap>
         <FileExplorer
           searchTerm={searchTerm}
           onSearchTermChange={onSearchTermChange}
           hideSearchInput={true}
+          currentFolderPath={currentFolderPath}
+          onOpenFolder={onOpenFolder}
         />
       </ExplorerWrap>
     </Board>

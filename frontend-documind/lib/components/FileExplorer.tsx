@@ -1,16 +1,15 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import styled, { keyframes } from "styled-components";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import {
   moveFileToFolder,
   overrideFileFolder,
   removeFile,
-  type FileItem,
-  type FolderType,
 } from "@/lib/features/fileSlice";
 import ClassificationResult from "@/lib/components/ClassificationResult";
+import { ExplorerFileRowItem, ExplorerFolderRow } from "@/lib/components/dashboard/ExplorerRows";
 
 type ViewMode = "grid" | "list" | "explorer";
 
@@ -18,9 +17,17 @@ type Props = {
   searchTerm?: string;
   onSearchTermChange?: (value: string) => void;
   hideSearchInput?: boolean;
+  currentFolderPath?: string;
+  onOpenFolder?: (fullPath: string) => void;
 };
 
-export default function FileExplorer({ searchTerm, onSearchTermChange, hideSearchInput = false }: Props) {
+export default function FileExplorer({
+  searchTerm,
+  onSearchTermChange,
+  hideSearchInput = false,
+  currentFolderPath,
+  onOpenFolder,
+}: Props) {
   const dispatch = useAppDispatch();
   const { files, folders } = useAppSelector((s) => s.files);
 
@@ -81,7 +88,7 @@ export default function FileExplorer({ searchTerm, onSearchTermChange, hideSearc
     setRenameValue(currentName);
   };
 
-  const confirmRename = (fileId: string) => {
+  const confirmRename = () => {
     // In produzione: chiamata API PATCH /api/v1/files/{id}
     // Qui aggiorna solo localmente per demo
     setRenaming(null);
@@ -107,16 +114,31 @@ export default function FileExplorer({ searchTerm, onSearchTermChange, hideSearc
     return true;
   });
 
-  // File raggruppati per cartella (vista explorer)
-  const filesByFolder = folders
+  const normalizedCurrentFolderPath = (currentFolderPath ?? "").trim();
+
+  const visibleFolders = folders
     .filter((f) => !f.system)
+    .filter((f) => {
+      if (!normalizedCurrentFolderPath) {
+        return !f.parentPath;
+      }
+      return f.parentPath === normalizedCurrentFolderPath;
+    })
     .sort((a, b) => a.fullPath.localeCompare(b.fullPath))
     .map((folder) => ({
       folder,
-      files: files.filter((f) => f.folder === folder.fullPath),
+      files: filteredFiles.filter((f) => f.folder === folder.fullPath),
     }));
 
-  const uncategorized = files.filter((f) => f.folder === "Non classificati" || !f.folder);
+  const currentFolderFiles = normalizedCurrentFolderPath
+    ? filteredFiles.filter((f) => f.folder === normalizedCurrentFolderPath)
+    : [];
+
+  const parentFolderPath = normalizedCurrentFolderPath
+    ? folders.find((f) => f.fullPath === normalizedCurrentFolderPath)?.parentPath ?? ""
+    : "";
+
+  const uncategorized = filteredFiles.filter((f) => f.folder === "Non classificati" || !f.folder);
 
   return (
     <ExplorerContainer>
@@ -212,9 +234,9 @@ export default function FileExplorer({ searchTerm, onSearchTermChange, hideSearc
                       <RenameInput
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.target.value)}
-                        onBlur={() => confirmRename(file.id)}
+                        onBlur={() => confirmRename()}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") confirmRename(file.id);
+                          if (e.key === "Enter") confirmRename();
                           if (e.key === "Escape") setRenaming(null);
                         }}
                         autoFocus
@@ -245,67 +267,82 @@ export default function FileExplorer({ searchTerm, onSearchTermChange, hideSearc
       ) : (
         /* VISTA EXPLORER — struttura ad albero */
         <ExplorerView>
-          {filesByFolder.length === 0 && (
+          {normalizedCurrentFolderPath && (
+            <BackFolderBtn type="button" onClick={() => onOpenFolder?.(parentFolderPath)}>
+              ← Torna alla cartella superiore
+            </BackFolderBtn>
+          )}
+
+          {visibleFolders.length === 0 && currentFolderFiles.length === 0 && (
             <EmptyFiles>
               <span>📁</span>
-              <p>Nessuna cartella disponibile. Creane una dalla sezione Tag.</p>
+              <p>Nessun contenuto in questa cartella.</p>
             </EmptyFiles>
           )}
 
-          {filesByFolder.map(({ folder, files: folderFiles }) => (
+          {currentFolderFiles.length > 0 && (
+            <ExplorerGroup>
+              <ExplorerFolderRow
+                icon="📄"
+                name="File in questa cartella"
+                count={currentFolderFiles.length}
+                color="#64748b"
+                dropTarget={false}
+              />
+              <ExplorerFiles>
+                {currentFolderFiles.map((file) => (
+                  <ExplorerFileRowItem
+                    key={file.id}
+                    file={file}
+                    dragging={draggingFileId === file.id}
+                    renaming={renaming === file.id}
+                    renameValue={renameValue}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onRenameStart={startRename}
+                    onRenameValueChange={setRenameValue}
+                    onRenameConfirm={confirmRename}
+                    onRenameCancel={() => setRenaming(null)}
+                    onDelete={(fileId) => dispatch(removeFile(fileId))}
+                  />
+                ))}
+              </ExplorerFiles>
+            </ExplorerGroup>
+          )}
+
+          {visibleFolders.map(({ folder, files: folderFiles }) => (
             <ExplorerGroup key={folder.id}>
-              <ExplorerGroupHeader
-                $color={folder.color}
+              <ExplorerFolderRow
+                icon={folder.icon}
+                name={folder.name}
+                count={folderFiles.length}
+                color={folder.color}
+                dropTarget={dragOverFolder === folder.fullPath}
+                onOpen={() => onOpenFolder?.(folder.fullPath)}
                 onDragOver={(e) => handleDragOver(e, folder.fullPath)}
                 onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, folder.fullPath)}
-                $dropTarget={dragOverFolder === folder.fullPath}
-              >
-                <ExplorerGroupIcon>{folder.icon}</ExplorerGroupIcon>
-                <ExplorerGroupName>{folder.fullPath}</ExplorerGroupName>
-                <ExplorerGroupCount>{folderFiles.length}</ExplorerGroupCount>
-                {dragOverFolder === folder.fullPath && <DropHere>⬇ Sposta qui</DropHere>}
-              </ExplorerGroupHeader>
+              />
 
               <ExplorerFiles>
                 {folderFiles.length === 0 ? (
                   <ExplorerEmptyFolder>Cartella vuota</ExplorerEmptyFolder>
                 ) : (
                   folderFiles.map((file) => (
-                    <ExplorerFileRow
+                    <ExplorerFileRowItem
                       key={file.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, file.id)}
+                      file={file}
+                      dragging={draggingFileId === file.id}
+                      renaming={renaming === file.id}
+                      renameValue={renameValue}
+                      onDragStart={handleDragStart}
                       onDragEnd={handleDragEnd}
-                      $dragging={draggingFileId === file.id}
-                    >
-                      <ExplorerFileIcon>📄</ExplorerFileIcon>
-                      <ExplorerFileName
-                        onDoubleClick={() => startRename(file.id, file.filename)}
-                      >
-                        {renaming === file.id ? (
-                          <RenameInput
-                            value={renameValue}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            onBlur={() => confirmRename(file.id)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") confirmRename(file.id);
-                              if (e.key === "Escape") setRenaming(null);
-                            }}
-                            autoFocus
-                          />
-                        ) : (
-                          file.filename
-                        )}
-                      </ExplorerFileName>
-                      <ExplorerFileTags>
-                        {file.tags.slice(0, 2).map((t) => <MiniTag key={t}>{t}</MiniTag>)}
-                      </ExplorerFileTags>
-                      <ExplorerFileStatus>
-                        {file.userOverride ? "👤" : file.analysisResult.type === "CLASSIFIED" ? "✅" : "🤔"}
-                      </ExplorerFileStatus>
-                      <ExplorerFileDelete onClick={() => dispatch(removeFile(file.id))}>🗑️</ExplorerFileDelete>
-                    </ExplorerFileRow>
+                      onRenameStart={startRename}
+                      onRenameValueChange={setRenameValue}
+                      onRenameConfirm={confirmRename}
+                      onRenameCancel={() => setRenaming(null)}
+                      onDelete={(fileId) => dispatch(removeFile(fileId))}
+                    />
                   ))
                 )}
               </ExplorerFiles>
@@ -315,20 +352,31 @@ export default function FileExplorer({ searchTerm, onSearchTermChange, hideSearc
           {/* Non classificati */}
           {uncategorized.length > 0 && (
             <ExplorerGroup>
-              <ExplorerGroupHeader $color="#9ca3af" $dropTarget={false}>
-                <ExplorerGroupIcon>🗂️</ExplorerGroupIcon>
-                <ExplorerGroupName>Non classificati</ExplorerGroupName>
-                <ExplorerGroupCount>{uncategorized.length}</ExplorerGroupCount>
-              </ExplorerGroupHeader>
+              <ExplorerFolderRow
+                icon="🗂️"
+                name="Non classificati"
+                count={uncategorized.length}
+                color="#9ca3af"
+                dropTarget={false}
+                onOpen={() => setActiveFolder("Non classificati")}
+              />
               <ExplorerFiles>
                 {uncategorized.map((file) => (
-                  <ExplorerFileRow key={file.id} draggable onDragStart={(e) => handleDragStart(e, file.id)} onDragEnd={handleDragEnd} $dragging={draggingFileId === file.id}>
-                    <ExplorerFileIcon>📄</ExplorerFileIcon>
-                    <ExplorerFileName>{file.filename}</ExplorerFileName>
-                    <ExplorerFileTags />
-                    <ExplorerFileStatus>🤔</ExplorerFileStatus>
-                    <ExplorerFileDelete onClick={() => dispatch(removeFile(file.id))}>🗑️</ExplorerFileDelete>
-                  </ExplorerFileRow>
+                  <ExplorerFileRowItem
+                    key={file.id}
+                    file={file}
+                    dragging={draggingFileId === file.id}
+                    renaming={false}
+                    renameValue={renameValue}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onRenameStart={startRename}
+                    onRenameValueChange={setRenameValue}
+                    onRenameConfirm={confirmRename}
+                    onRenameCancel={() => setRenaming(null)}
+                    onDelete={(fileId) => dispatch(removeFile(fileId))}
+                    showTags={false}
+                  />
                 ))}
               </ExplorerFiles>
             </ExplorerGroup>
@@ -385,33 +433,23 @@ const RenameInput = styled.input`border:1px solid #1b6f5c;border-radius:6px;padd
 
 // EXPLORER VIEW
 const ExplorerView = styled.div`display:flex;flex-direction:column;gap:12px;`;
-const ExplorerGroup = styled.div`background:#fff;border:1px solid #e5ede9;border-radius:14px;overflow:hidden;`;
-const ExplorerGroupHeader = styled.div<{ $color: string; $dropTarget: boolean }>`
-  display:flex;align-items:center;gap:10px;padding:12px 16px;
-  background:${({ $dropTarget }) => $dropTarget ? "#f0faf5" : "#f9fdf9"};
-  border-bottom:1px solid #e5ede9;
-  border:${({ $dropTarget }) => $dropTarget ? "2px dashed #1b6f5c" : "none"};
-  position:relative;
+const BackFolderBtn = styled.button`
+  align-self: flex-start;
+  border: 1px solid #d0ddd9;
+  background: #ffffff;
+  color: #1f2937;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    background: #f8fafc;
+  }
 `;
-const ExplorerGroupIcon = styled.span`font-size:1.2rem;`;
-const ExplorerGroupName = styled.span`font-weight:700;font-size:0.9rem;color:#1a3a30;flex:1;`;
-const ExplorerGroupCount = styled.span`font-size:0.74rem;color:#888;background:#f0f0f0;border-radius:999px;padding:2px 8px;`;
-const DropHere = styled.span`font-size:0.74rem;font-weight:700;color:#1b6f5c;margin-left:8px;`;
+const ExplorerGroup = styled.div`background:#fff;border:1px solid #e5ede9;border-radius:14px;overflow:hidden;`;
 const ExplorerFiles = styled.div``;
 const ExplorerEmptyFolder = styled.div`padding:10px 16px 10px 32px;color:#74807c;font-size:0.82rem;`;
-const ExplorerFileRow = styled.div<{ $dragging: boolean }>`
-  display:flex;align-items:center;gap:10px;padding:9px 16px 9px 32px;
-  border-bottom:1px solid #f0f0f0;cursor:grab;
-  background:${({ $dragging }) => $dragging ? "#f0faf5" : "transparent"};
-  opacity:${({ $dragging }) => $dragging ? 0.5 : 1};
-  &:last-child{border-bottom:none;}
-  &:hover{background:#f9fdf9;}
-`;
-const ExplorerFileIcon = styled.span`font-size:0.9rem;`;
-const ExplorerFileName = styled.div`flex:1;font-size:0.85rem;color:#1a3a30;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:text;`;
-const ExplorerFileTags = styled.div`display:flex;gap:4px;`;
-const MiniTag = styled.span`font-size:0.65rem;background:#f0faf5;color:#1b6f5c;border-radius:999px;padding:1px 6px;`;
-const ExplorerFileStatus = styled.span`font-size:0.85rem;`;
-const ExplorerFileDelete = styled.button`background:none;border:none;cursor:pointer;opacity:0.3;font-size:0.8rem;&:hover{opacity:1;}`;
 
 const EmptyFiles = styled.div`text-align:center;padding:40px;background:#fff;border:1px dashed #d0ddd9;border-radius:14px;span{font-size:2rem;display:block;margin-bottom:8px;}p{color:#888;font-size:0.92rem;}`;

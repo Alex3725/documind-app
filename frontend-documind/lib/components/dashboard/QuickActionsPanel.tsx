@@ -23,15 +23,13 @@ export default function QuickActionsPanel({ foldersCount, onAddFolder, onAddType
   const [showFileModal, setShowFileModal] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderDescription, setFolderDescription] = useState("");
-  const [useFolderNameAsTag, setUseFolderNameAsTag] = useState(true);
-  const [customTagName, setCustomTagName] = useState("");
+  const [folderTags, setFolderTags] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [busy, setBusy] = useState<"none" | "folder" | "file">("none");
 
   const disableFolderSave = useMemo(() => {
-    const tagName = useFolderNameAsTag ? folderName.trim() : customTagName.trim();
-    return folderName.trim().length < 2 || tagName.length < 2 || busy !== "none";
-  }, [folderName, busy, useFolderNameAsTag, customTagName]);
+    return folderName.trim().length < 2 || busy !== "none";
+  }, [folderName, busy]);
 
   const handleSaveFolder = async () => {
     if (disableFolderSave) return;
@@ -39,20 +37,22 @@ export default function QuickActionsPanel({ foldersCount, onAddFolder, onAddType
     try {
       const normalizedName = folderName.trim();
       const semanticRules = folderDescription.trim();
-      const tagName = useFolderNameAsTag ? normalizedName : customTagName.trim();
+      const autoTags = folderTags
+        .split(",")
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean);
 
       await onAddFolder({
         name: normalizedName,
         description: semanticRules,
         semanticRules,
-        autoUpdateType: useFolderNameAsTag,
-        autoTags: tagName ? [tagName] : [],
+        autoUpdateType: autoTags.length > 0,
+        autoTags,
       });
       setShowFolderModal(false);
       setFolderName("");
       setFolderDescription("");
-      setUseFolderNameAsTag(true);
-      setCustomTagName("");
+      setFolderTags("");
     } finally {
       setBusy("none");
     }
@@ -90,30 +90,18 @@ export default function QuickActionsPanel({ foldersCount, onAddFolder, onAddType
               value={folderName}
               onChange={(e) => setFolderName(e.target.value)}
             />
-            <SwitchRow>
-              <SwitchLabel>
-                <SwitchInput
-                  type="checkbox"
-                  checked={useFolderNameAsTag}
-                  onChange={(e) => setUseFolderNameAsTag(e.target.checked)}
-                />
-                <span>Usa nome cartella come tag</span>
-              </SwitchLabel>
-            </SwitchRow>
-            {!useFolderNameAsTag && (
-              <Input
-                placeholder="Nome tag personalizzato"
-                value={customTagName}
-                onChange={(e) => setCustomTagName(e.target.value)}
-              />
-            )}
+            <Input
+              placeholder="Tag cartella, separati da virgola"
+              value={folderTags}
+              onChange={(e) => setFolderTags(e.target.value)}
+            />
             <Textarea
               placeholder="Descrizione semantica usata per trovare i file"
               value={folderDescription}
               onChange={(e) => setFolderDescription(e.target.value)}
             />
             <Hint>
-              Se lo switch è attivo il tag coincide con il nome cartella. Se lo disattivi, il backend userà la descrizione per assegnare il tag scelto.
+              Nessun tag viene creato in automatico. Puoi inserire anche piu tag per cartella, ad esempio: lavoro, svago, poesia.
             </Hint>
             <ModalActions>
               <GhostBtn type="button" onClick={() => setShowFolderModal(false)}>Annulla</GhostBtn>

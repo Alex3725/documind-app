@@ -48,10 +48,11 @@ public class FileController {
 			@RequestParam(required = false) FileSubType subType,
 			@RequestParam(required = false) FileSemanticType semanticType,
 			@RequestParam(required = false) String tag,
+			@RequestParam(required = false) String folderPath,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime uploadedFrom,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime uploadedTo
 	) {
-		List<FileResponse> responses = fileService.listFiles(token, category, subType, semanticType, tag, uploadedFrom, uploadedTo);
+		List<FileResponse> responses = fileService.listFiles(token, category, subType, semanticType, tag, folderPath, uploadedFrom, uploadedTo);
 		return ResponseEntity.ok(responses);
 	}
 

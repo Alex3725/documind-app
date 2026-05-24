@@ -30,6 +30,10 @@ public class File {
     // 📁 Dove sta realmente
     private String path;
 
+    // 📂 Cartella logica del file nel workspace dell'utente
+    @Column(name = "folder_path")
+    private String folderPath;
+
     // 📂 Tipo tecnico
     @Enumerated(EnumType.STRING)
     private FileCategory category;

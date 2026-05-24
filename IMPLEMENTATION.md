@@ -19,6 +19,7 @@ In parallelo, rendere effettiva lato server la logica cartella/tag: quando una c
 
 - `WorkspacePathBar` per mostrare branch/path e metadati del workspace.
 - `WorkspacePreviewCard` per il blocco scuro di preview/immagine.
+- `ExplorerRows` con righe riusabili (`ExplorerFolderRow`, `ExplorerFileRowItem`) per la vista centrale file/cartelle.
 - La configurazione rapida delle cartelle è stata allineata al nuovo comportamento semantico.
 
 ### Creazione cartelle e tag
@@ -57,6 +58,8 @@ In parallelo, rendere effettiva lato server la logica cartella/tag: quando una c
 - `frontend-documind/lib/components/dashboard/QuickActionsPanel.tsx`
 - `frontend-documind/lib/components/dashboard/WorkspacePathBar.tsx`
 - `frontend-documind/lib/components/dashboard/WorkspacePreviewCard.tsx`
+- `frontend-documind/lib/components/dashboard/ExplorerRows.tsx`
+- `frontend-documind/lib/components/FileExplorer.tsx`
 - `frontend-documind/app/tags/page.tsx`
 - `springboot-documind/src/main/java/com/example/documind/entities/classifications/ClassificationService.java`
 
@@ -82,3 +85,11 @@ In parallelo, rendere effettiva lato server la logica cartella/tag: quando una c
 
 - Il backend non è stato reimpostato: la modifica è stata fatta in modo incrementale sopra la logica esistente.
 - La logica di matching è volutamente conservativa: assegna la cartella solo quando il punteggio supera una soglia minima, per evitare falsi positivi.
+- Nella vista `explorer` la ricerca ora filtra correttamente i file mostrati per cartella, evitando mismatch tra search strip e contenuto centrale.
+
+## Verifiche eseguite
+
+1. Backend compile: `./mvnw -q -DskipTests compile` OK.
+2. Backend test: `./mvnw -q clean test` OK.
+3. Frontend lint: nessun errore bloccante (solo warning già presenti su file non legati al refactor).
+4. Frontend typecheck/build: `pnpm exec tsc --noEmit` OK, `pnpm build` OK.

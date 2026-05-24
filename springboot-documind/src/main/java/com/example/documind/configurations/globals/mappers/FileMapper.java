@@ -14,6 +14,7 @@ public class FileMapper {
 		File file = new File();
 		file.setName(request.getName());
 		file.setPath(request.getPath());
+		file.setFolderPath(request.getFolderPath());
 		file.setCategory(request.getCategory());
 		file.setSubType(request.getSubType());
 		file.setMimeType(request.getMimeType());
@@ -33,6 +34,7 @@ public class FileMapper {
 		response.setId(file.getId());
 		response.setName(file.getName());
 		response.setPath(file.getPath());
+		response.setFolderPath(file.getFolderPath());
 		response.setCategory(file.getCategory());
 		response.setSubType(file.getSubType());
 		response.setMimeType(file.getMimeType());

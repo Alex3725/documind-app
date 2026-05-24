@@ -56,6 +56,9 @@ public class FileService {
 		File file = fileMapper.toEntity(request);
 		file.setOwner(owner);
 		file.setTags(fileValidator.normalizeTags(request.getTags()));
+		if (!StringUtils.hasText(file.getFolderPath())) {
+			file.setFolderPath("Non classificati");
+		}
 
 		LocalDateTime now = LocalDateTime.now();
 		file.setUploadDate(now);
@@ -80,6 +83,9 @@ public class FileService {
         file.setOwner(owner);
         file.setUploaderIp(uploaderIp);
         file.setUploaderToken(uploaderToken);
+		if (!StringUtils.hasText(file.getFolderPath())) {
+			file.setFolderPath("Non classificati");
+		}
 
 		LocalDateTime now = LocalDateTime.now();
 		file.setUploadDate(now);
@@ -97,6 +103,7 @@ public class FileService {
 			FileSubType subType,
 			FileSemanticType semanticType,
 			String tag,
+			String folderPath,
 			LocalDateTime uploadedFrom,
 			LocalDateTime uploadedTo
 	) {
@@ -105,8 +112,12 @@ public class FileService {
 		List<FileResponse> responses = new ArrayList<>();
 
 		String normalizedTag = StringUtils.hasText(tag) ? tag.trim().toLowerCase() : null;
+		String normalizedFolderPath = StringUtils.hasText(folderPath) ? folderPath.trim() : null;
 		for (File file : files) {
 			if (normalizedTag != null && (file.getTags() == null || !file.getTags().contains(normalizedTag))) {
+				continue;
+			}
+			if (normalizedFolderPath != null && !normalizedFolderPath.equals(file.getFolderPath())) {
 				continue;
 			}
 			responses.add(fileMapper.toResponse(file));
@@ -140,6 +151,9 @@ public class FileService {
 		}
 		if (StringUtils.hasText(request.getPath())) {
 			file.setPath(request.getPath());
+		}
+		if (StringUtils.hasText(request.getFolderPath())) {
+			file.setFolderPath(request.getFolderPath());
 		}
 		if (request.getCategory() != null) {
 			file.setCategory(request.getCategory());

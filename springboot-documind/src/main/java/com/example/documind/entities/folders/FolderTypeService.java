@@ -14,6 +14,12 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -29,6 +35,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class FolderTypeService {
+
+    private static final Pattern REFERENCE_PATTERN = Pattern.compile("\\[\\[(folder|tag):([^\\]]+)\\]\\]", Pattern.CASE_INSENSITIVE);
 
     private final FolderTypeRepository folderTypeRepository;
     private final TokenRepository tokenRepository;
@@ -69,7 +77,7 @@ public class FolderTypeService {
         folder.setIcon(request.getIcon() != null ? request.getIcon() : "📁");
         folder.setColor(request.getColor() != null ? request.getColor() : "#6b7280");
         folder.setAutoTags(request.getAutoTags() != null ? request.getAutoTags() : new ArrayList<>());
-        folder.setAutoUpdateType(request.getAutoUpdateType() == null || request.getAutoUpdateType());
+        folder.setAutoUpdateType(request.getAutoUpdateType() != null && request.getAutoUpdateType());
 
         FolderType saved = folderTypeRepository.save(folder);
         return toResponse(saved);
@@ -168,17 +176,138 @@ public class FolderTypeService {
     @Transactional(readOnly = true)
     public java.util.Map<String, String> buildAITypeDescriptions(String owner) {
         List<FolderType> folders = folderTypeRepository.findAllByOwnerOrderByFullPathAsc(owner);
+        Map<String, FolderType> byFullPath = folders.stream()
+                .filter(f -> StringUtils.hasText(f.getFullPath()))
+                .collect(Collectors.toMap(
+                        f -> normalizeKey(f.getFullPath()),
+                        f -> f,
+                        (a, b) -> a,
+                        HashMap::new
+                ));
+
+        Map<String, FolderType> byTag = new HashMap<>();
+        for (FolderType folder : folders) {
+            if (StringUtils.hasText(folder.getName())) {
+                byTag.putIfAbsent(normalizeKey(folder.getName()), folder);
+            }
+            if (folder.getAutoTags() != null) {
+                for (String tag : folder.getAutoTags()) {
+                    if (StringUtils.hasText(tag)) {
+                        byTag.putIfAbsent(normalizeKey(tag), folder);
+                    }
+                }
+            }
+        }
+
         java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
         for (FolderType folder : folders) {
-            if (StringUtils.hasText(folder.getDescription())) {
-                String desc = folder.getDescription();
-                if (StringUtils.hasText(folder.getSemanticRules())) {
-                    desc += " | Regole: " + folder.getSemanticRules();
-                }
-                result.put(folder.getFullPath(), desc);
+            String enriched = buildEnrichedDescription(folder, byFullPath, byTag, new LinkedHashSet<>(), 0);
+            if (StringUtils.hasText(enriched)) {
+                result.put(folder.getFullPath(), enriched);
             }
         }
         return result;
+    }
+
+    private String buildEnrichedDescription(
+            FolderType folder,
+            Map<String, FolderType> byFullPath,
+            Map<String, FolderType> byTag,
+            Set<String> visited,
+            int depth
+    ) {
+        if (folder == null || depth > 3) {
+            return null;
+        }
+
+        String identityKey = normalizeKey(folder.getFullPath() != null ? folder.getFullPath() : folder.getName());
+        if (!StringUtils.hasText(identityKey) || !visited.add(identityKey)) {
+            return null;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        if (StringUtils.hasText(folder.getDescription())) {
+            builder.append(folder.getDescription().trim());
+        }
+        if (StringUtils.hasText(folder.getSemanticRules())) {
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append("Regole: ").append(folder.getSemanticRules().trim());
+        }
+
+        List<String> references = extractReferencedDescriptions(folder.getDescription(), byFullPath, byTag, visited, depth + 1);
+        if (StringUtils.hasText(folder.getSemanticRules())) {
+            references.addAll(extractReferencedDescriptions(folder.getSemanticRules(), byFullPath, byTag, visited, depth + 1));
+        }
+
+        if (!references.isEmpty()) {
+            builder.append(" | Riferimenti: ");
+            builder.append(String.join(" || ", references));
+        }
+
+        return builder.toString().trim();
+    }
+
+    private List<String> extractReferencedDescriptions(
+            String text,
+            Map<String, FolderType> byFullPath,
+            Map<String, FolderType> byTag,
+            Set<String> visited,
+            int depth
+    ) {
+        if (!StringUtils.hasText(text) || depth > 3) {
+            return List.of();
+        }
+
+        List<String> references = new ArrayList<>();
+        Matcher matcher = REFERENCE_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String kind = matcher.group(1);
+            String target = matcher.group(2).trim();
+            FolderType referenced = resolveReference(kind, target, byFullPath, byTag);
+            if (referenced == null) {
+                continue;
+            }
+
+            String refKey = normalizeKey(referenced.getFullPath() != null ? referenced.getFullPath() : referenced.getName());
+            if (!StringUtils.hasText(refKey) || visited.contains(refKey)) {
+                continue;
+            }
+
+            String resolved = buildEnrichedDescription(referenced, byFullPath, byTag, new LinkedHashSet<>(visited), depth);
+            if (StringUtils.hasText(resolved)) {
+                references.add("[" + referenced.getFullPath() + "] " + resolved);
+            }
+        }
+        return references;
+    }
+
+    private FolderType resolveReference(String kind, String target, Map<String, FolderType> byFullPath, Map<String, FolderType> byTag) {
+        if (!StringUtils.hasText(target)) {
+            return null;
+        }
+
+        if ("folder".equalsIgnoreCase(kind)) {
+            FolderType byPath = byFullPath.get(normalizeKey(target));
+            if (byPath != null) {
+                return byPath;
+            }
+        }
+
+        FolderType byNameOrTag = byTag.get(normalizeKey(target));
+        if (byNameOrTag != null) {
+            return byNameOrTag;
+        }
+
+        return byFullPath.get(normalizeKey(target));
+    }
+
+    private String normalizeKey(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.trim().toLowerCase();
     }
 
     // =====================================================

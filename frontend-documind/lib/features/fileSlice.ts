@@ -74,6 +74,8 @@ export type FolderType = {
   autoTags?: string[];
   autoUpdateType: boolean;
   system: boolean;
+  trashed?: boolean;
+  trashedAt?: string;
   fileCount: number;
   depth: number;
   createdAt?: string;
@@ -83,9 +85,11 @@ type FileState = {
   files: FileItem[];
   pendingAnalysis: AnalysisResult | null;
   folders: FolderType[];
+  trashedFolders: FolderType[];
   foldersLoaded: boolean;
   status: "idle" | "loading" | "succeeded" | "failed";
   foldersStatus: "idle" | "loading" | "succeeded" | "failed";
+  trashedFoldersStatus: "idle" | "loading" | "succeeded" | "failed";
   error: string | null;
   errorCode: string | null;
 };
@@ -94,9 +98,11 @@ const initialState: FileState = {
   files: [],
   pendingAnalysis: null,
   folders: [],
+  trashedFolders: [],
   foldersLoaded: false,
   status: "idle",
   foldersStatus: "idle",
+  trashedFoldersStatus: "idle",
   error: null,
   errorCode: null,
 };
@@ -191,6 +197,18 @@ export const loadFolders = createAsyncThunk<
   return (await response.json()) as FolderType[];
 });
 
+export const loadTrashedFolders = createAsyncThunk<
+  FolderType[],
+  void,
+  { rejectValue: string }
+>("files/loadTrashedFolders", async (_, thunkApi) => {
+  const response = await fetch("/api/folders/trash", {
+    credentials: "include",
+  });
+  if (!response.ok) return thunkApi.rejectWithValue("Errore caricamento cestino.");
+  return (await response.json()) as FolderType[];
+});
+
 export const createFolder = createAsyncThunk<
   FolderType,
   {
@@ -227,6 +245,61 @@ export const seedFolderProfile = createAsyncThunk<
   });
   if (!response.ok) return thunkApi.rejectWithValue("Errore seeding profilo.");
   return (await response.json()) as FolderType[];
+});
+
+export const trashFolder = createAsyncThunk<
+  void,
+  number,
+  { rejectValue: string }
+>("files/trashFolder", async (folderId, thunkApi) => {
+  const response = await fetch(`/api/folders/${folderId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok && response.status !== 204) return thunkApi.rejectWithValue("Errore cestinamento cartella.");
+});
+
+export const restoreFolder = createAsyncThunk<
+  FolderType,
+  number,
+  { rejectValue: string }
+>("files/restoreFolder", async (folderId, thunkApi) => {
+  const response = await fetch(`/api/folders/${folderId}/restore`, {
+    method: "PATCH",
+    credentials: "include",
+  });
+  if (!response.ok) return thunkApi.rejectWithValue("Errore ripristino cartella.");
+  return (await response.json()) as FolderType;
+});
+
+export const moveFolder = createAsyncThunk<
+  FolderType,
+  { folderId: number; targetParentPath?: string; newName?: string },
+  { rejectValue: string }
+>("files/moveFolder", async (payload, thunkApi) => {
+  const response = await fetch(`/api/folders/${payload.folderId}/move`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetParentPath: payload.targetParentPath, newName: payload.newName }),
+  });
+  if (!response.ok) return thunkApi.rejectWithValue("Errore spostamento cartella.");
+  return (await response.json()) as FolderType;
+});
+
+export const copyFolder = createAsyncThunk<
+  FolderType,
+  { folderId: number; targetParentPath?: string; newName?: string },
+  { rejectValue: string }
+>("files/copyFolder", async (payload, thunkApi) => {
+  const response = await fetch(`/api/folders/${payload.folderId}/copy`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetParentPath: payload.targetParentPath, newName: payload.newName }),
+  });
+  if (!response.ok) return thunkApi.rejectWithValue("Errore copia cartella.");
+  return (await response.json()) as FolderType;
 });
 
 // ============================================================
@@ -384,6 +457,12 @@ const fileSlice = createSlice({
         state.foldersStatus = "succeeded";
       })
       .addCase(loadFolders.rejected, (state) => { state.foldersStatus = "failed"; })
+      .addCase(loadTrashedFolders.pending, (state) => { state.trashedFoldersStatus = "loading"; })
+      .addCase(loadTrashedFolders.fulfilled, (state, action) => {
+        state.trashedFolders = action.payload;
+        state.trashedFoldersStatus = "succeeded";
+      })
+      .addCase(loadTrashedFolders.rejected, (state) => { state.trashedFoldersStatus = "failed"; })
       .addCase(createFolder.fulfilled, (state, action) => {
         state.folders.push(action.payload);
         state.folders.sort((a, b) => a.fullPath.localeCompare(b.fullPath));

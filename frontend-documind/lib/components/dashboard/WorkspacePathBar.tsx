@@ -2,6 +2,14 @@
 
 import styled from "styled-components";
 
+type AddFolderPayload = {
+  name: string;
+  description: string;
+  semanticRules: string;
+  autoUpdateType: boolean;
+  autoTags: string[];
+};
+
 type Props = {
   branch?: string;
   scope?: string;
@@ -45,6 +53,18 @@ const Bar = styled.div`
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(8px);
+
+  @media (max-width: 768px) {
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 12px;
+  }
+
+  @media (max-width: 640px) {
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 10px;
+  }
 `;
 
 const Trail = styled.div`
@@ -52,6 +72,10 @@ const Trail = styled.div`
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+
+  @media (max-width: 640px) {
+    gap: 4px;
+  }
 `;
 
 const Pill = styled.span<{ $muted?: boolean }>`
@@ -74,10 +98,25 @@ const Meta = styled.div`
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+
+  @media (max-width: 768px) {
+    gap: 6px;
+  }
+
+  @media (max-width: 640px) {
+    gap: 4px;
+    flex-direction: row;
+    align-items: flex-start;
+    width: 100%;
+  }
 `;
 
 const MetaItem = styled.span`
   font-size: 0.76rem;
   color: #64748b;
   font-weight: 600;
+
+  @media (max-width: 640px) {
+    font-size: 0.70rem;
+  }
 `;

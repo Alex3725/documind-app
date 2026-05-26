@@ -22,6 +22,8 @@ public class FolderTypeResponse {
     private List<String> autoTags;
     private boolean autoUpdateType;
     private boolean system;
+    private boolean trashed;
+    private LocalDateTime trashedAt;
     private int fileCount;
     private int depth;
     private LocalDateTime createdAt;

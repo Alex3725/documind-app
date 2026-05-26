@@ -7,6 +7,7 @@ import {
   confirmClassification,
   clearPendingAnalysis,
   loadFolders,
+  loadTrashedFolders,
   createFolder,
   uploadAndAnalyze,
   addFileWithoutAnalysis,
@@ -15,12 +16,11 @@ import ConfirmationPopup from "@/lib/components/ConfirmationPopup";
 import PrivacyConsentModal from "@/lib/components/PrivacyConsentModal";
 import OnboardingModal from "@/lib/components/OnboardingModal";
 import { buildOnboardingFolderPayload } from "@/lib/onboardingFolders";
-import TopUtilityBar from "@/lib/components/dashboard/TopUtilityBar";
 import SearchStrip from "@/lib/components/dashboard/SearchStrip";
-import MemoryCircleCard from "@/lib/components/dashboard/MemoryCircleCard";
-import QuickActionsPanel from "@/lib/components/dashboard/QuickActionsPanel";
 import FoldersBoard from "@/lib/components/dashboard/FoldersBoard";
 import WorkspacePathBar from "@/lib/components/dashboard/WorkspacePathBar";
+import CreateActionsDropdown from "@/lib/components/dashboard/CreateActionsDropdown";
+import TrashBoard from "@/lib/components/dashboard/TrashBoard";
 import WorkspacePreviewCard from "@/lib/components/dashboard/WorkspacePreviewCard";
 import WorkspaceStatusPieCard from "@/lib/components/dashboard/WorkspaceStatusPieCard";
 import { useRouter } from "next/navigation";
@@ -56,6 +56,30 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
 
   const currentFolderPath = useMemo(() => toFullPath(folderPathSegments), [folderPathSegments]);
 
+  const existingTags = useMemo(() => {
+    const collected = new Set<string>();
+
+    for (const folder of folders) {
+      for (const tag of folder.autoTags ?? []) {
+        const normalized = tag.trim().toLowerCase();
+        if (normalized) collected.add(normalized);
+      }
+    }
+
+    for (const file of files) {
+      for (const tag of file.tags ?? []) {
+        const normalized = tag.trim().toLowerCase();
+        if (normalized) collected.add(normalized);
+      }
+      for (const tag of file.confirmedTags ?? []) {
+        const normalized = tag.trim().toLowerCase();
+        if (normalized) collected.add(normalized);
+      }
+    }
+
+    return Array.from(collected).sort((a, b) => a.localeCompare(b));
+  }, [files, folders]);
+
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -66,6 +90,12 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
   useEffect(() => {
     dispatch(loadFolders());
   }, [dispatch]);
+
+  useEffect(() => {
+    if (currentFolderPath === "cestino") {
+      dispatch(loadTrashedFolders());
+    }
+  }, [currentFolderPath, dispatch]);
 
   useEffect(() => {
     const privacyAccepted = !!localStorage.getItem("documind:privacy");
@@ -180,6 +210,7 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
   };
 
   const activeSection = currentFolderPath ? `Folder: ${currentFolderPath}` : "Dashboard";
+  const isTrashView = currentFolderPath === "cestino";
 
   const totalMemoryGb = 5.64;
   const usedMemoryGb = Math.min(totalMemoryGb, Math.max(0.08, files.length * 0.12));
@@ -222,16 +253,25 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
             userName={user?.name}
             userSurname={user?.surname}
             onLogout={handleLogout}
+            totalMemoryGb={totalMemoryGb}
+            usedMemoryGb={usedMemoryGb}
+            filesCount={files.length}
+            onAddFile={handleAddFile}
           />
 
           <Main>
-            <TopUtilityBar
-              userName={user?.name}
-              sectionLabel={activeSection}
-              onLogout={handleLogout}
-              onOpenTutorial={() => setShowTutorial(true)}
-              onOpenSettings={() => router.push("/settings")}
-            />
+            {!isTrashView && (
+              <TopActionsRow>
+                <TopActionsSpacer />
+                <CreateActionsDropdown
+                  foldersCount={folders.filter((f) => !f.system).length}
+                  existingTags={existingTags}
+                  onAddFolder={handleCreateFolder}
+                  onAddType={() => router.push("/tags")}
+                  onAddFile={handleAddFile}
+                />
+              </TopActionsRow>
+            )}
 
             <WorkspacePathBar
               folderCount={folders.filter((f) => !f.system).length}
@@ -239,51 +279,43 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
               section={currentFolderPath || "cartelle"}
             />
 
-            <SearchStrip value={searchTerm} onChange={setSearchTerm} />
+            {isTrashView ? (
+              <TrashBoard onBackToWorkspace={() => router.push("/dashboard")} />
+            ) : (
+              <>
+                <SearchStrip value={searchTerm} onChange={setSearchTerm} />
 
-            <WorkspaceGrid>
-              <LeftCol>
-                <QuickActionsPanel
-                  foldersCount={folders.filter((f) => !f.system).length}
-                  onAddFolder={handleCreateFolder}
-                  onAddType={() => router.push("/tags")}
-                  onAddFile={handleAddFile}
-                />
-                <MemoryCircleCard
-                  totalGb={totalMemoryGb}
-                  usedGb={usedMemoryGb}
-                  fileCount={files.length}
-                />
-              </LeftCol>
+                <WorkspaceGrid>
+                  <CenterCol>
+                    <FoldersBoard
+                      searchTerm={searchTerm}
+                      onSearchTermChange={setSearchTerm}
+                      currentFolderPath={currentFolderPath}
+                      onOpenFolder={handleOpenFolder}
+                    />
+                  </CenterCol>
 
-              <CenterCol>
-                <FoldersBoard
-                  searchTerm={searchTerm}
-                  onSearchTermChange={setSearchTerm}
-                  currentFolderPath={currentFolderPath}
-                  onOpenFolder={handleOpenFolder}
-                />
-              </CenterCol>
+                  <RightRail>
+                    <WorkspaceStatusPieCard
+                      totalFiles={files.length}
+                      classified={statsClassified}
+                      pending={statsPending}
+                      lowConfidence={statsLow}
+                      manual={statsManual}
+                    />
 
-              <RightRail>
-                <WorkspaceStatusPieCard
-                  totalFiles={files.length}
-                  classified={statsClassified}
-                  pending={statsPending}
-                  lowConfidence={statsLow}
-                  manual={statsManual}
-                />
+                    <WorkspacePreviewCard text="Area riservata alla preview del contenuto del workspace." />
 
-                <WorkspacePreviewCard text="Area riservata alla preview del contenuto del workspace." />
-
-                {status === "loading" && (
-                  <AnalyzingBanner>
-                    <AnalyzingSpinner />
-                    Analisi AI in corso — Classificazione gerarchica a 3 livelli...
-                  </AnalyzingBanner>
-                )}
-              </RightRail>
-            </WorkspaceGrid>
+                    {status === "loading" && (
+                      <AnalyzingBanner>
+                        <AnalyzingSpinner />
+                        Analisi AI in corso — Classificazione gerarchica a 3 livelli...
+                      </AnalyzingBanner>
+                    )}
+                  </RightRail>
+                </WorkspaceGrid>
+              </>
+            )}
           </Main>
         </Shell>
       </PageWrapper>
@@ -293,42 +325,97 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
 
 const PageWrapper = styled.div`
   min-height: calc(100vh - 48px);
+  padding: 0 8px;
+
+  @media (max-width: 768px) {
+    padding: 0 6px;
+  }
+
+  @media (max-width: 640px) {
+    padding: 0 4px;
+  }
 `;
 
 const Shell = styled.div`
   display: grid;
-  grid-template-columns: minmax(260px, 308px) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 12px;
   min-height: calc(100vh - 48px);
 
   @media (max-width: 1120px) {
     grid-template-columns: 1fr;
+  }
+
+  @media (max-width: 768px) {
+    gap: 8px;
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 `;
 
 const Main = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
   padding: 0 2px;
+
+  @media (max-width: 768px) {
+    gap: 8px;
+    padding: 0 2px;
+  }
+
+  @media (max-width: 640px) {
+    gap: 6px;
+    padding: 0 2px;
+  }
+`;
+
+const TopActionsRow = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 42px;
+  padding: 2px 0 0;
+
+  @media (max-width: 768px) {
+    min-height: 38px;
+  }
+
+  @media (max-width: 640px) {
+    min-height: 34px;
+    padding-top: 0;
+  }
+`;
+
+const TopActionsSpacer = styled.div`
+  flex: 1;
 `;
 
 const WorkspaceGrid = styled.div`
   display: grid;
-  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(240px, 280px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
+  gap: 10px;
 
   @media (max-width: 1180px) {
     grid-template-columns: 1fr;
   }
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 `;
 
-const LeftCol = styled.div`
-  display: grid;
-  grid-template-rows: 1fr auto;
-  gap: 12px;
-`;
+
 
 const CenterCol = styled.div`min-width: 0;`;
 

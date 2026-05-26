@@ -3,26 +3,42 @@
 import { useRouter } from "next/navigation";
 import styled from "styled-components";
 import DocuMindLogo from "@/lib/components/DocuMindLogo";
+import MemoryCircleCard from "./MemoryCircleCard";
 
 type Props = {
   userName?: string;
   userSurname?: string;
   onLogout: () => void;
+  totalMemoryGb?: number;
+  usedMemoryGb?: number;
+  filesCount?: number;
+  onAddFile?: (file: File, runAnalysis: boolean) => Promise<void>;
 };
 
 const navigationItems = [
   { label: "Dashboard", description: "Panoramica del workspace", href: "/dashboard", active: true },
-  { label: "Documents", description: "Archivio e contenuti", href: "/wip/documents" },
   { label: "AI Classifier", description: "Classificazione intelligente", href: "/wip/ai-classifier" },
   { label: "Smart Tags", description: "Tipi semantici", href: "/tags" },
-  { label: "Workflows", description: "Automazioni e processi", href: "/wip/workflows" },
-  { label: "Reports", description: "Analisi e report", href: "/wip/reports" },
-  { label: "Integrations", description: "Connessioni esterne", href: "/wip/integrations" },
   { label: "Settings", description: "Preferenze utente", href: "/settings" },
+  { label: "Cestino", description: "Cartelle eliminate", href: "/dashboard/cestino" },
 ];
 
-export default function DashboardSidebar({ userName, userSurname, onLogout }: Props) {
+export default function DashboardSidebar({ 
+  userName, 
+  userSurname, 
+  onLogout,
+  totalMemoryGb = 5.64,
+  usedMemoryGb = 0.08,
+  filesCount = 0,
+  onAddFile
+}: Props) {
   const router = useRouter();
+
+  const handleFileUpload = async (file: File, runAnalysis: boolean) => {
+    if (onAddFile) {
+      await onAddFile(file, runAnalysis);
+    }
+  };
 
   return (
     <Sidebar>
@@ -57,6 +73,12 @@ export default function DashboardSidebar({ userName, userSurname, onLogout }: Pr
       </SidebarSection>
 
       <SidebarFooter>
+        <MemoryCircleCard
+          totalGb={totalMemoryGb}
+          usedGb={usedMemoryGb}
+          fileCount={filesCount}
+        />
+
         <UserCard>
           <UserAvatar>{(userName?.[0] ?? "U").toUpperCase()}</UserAvatar>
           <UserCardCopy>
@@ -77,36 +99,62 @@ export default function DashboardSidebar({ userName, userSurname, onLogout }: Pr
 const Sidebar = styled.aside`
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 18px;
-  border-radius: 24px;
-  background: linear-gradient(180deg, #081523 0%, #071120 100%);
-  border: 1px solid rgba(96, 165, 250, 0.16);
-  color: #e5eefc;
-  box-shadow: 0 22px 50px rgba(6, 15, 28, 0.24);
-}
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid #dbe4e0;
+  color: #0f172a;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);  height: fit-content;
+  max-height: calc(100vh - 32px);
+
+  @media (max-width: 768px) {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  @media (max-width: 640px) {
+    gap: 6px;
+    padding: 6px;
+    border-radius: 10px;
+  }
+`;
 
 const BrandBlock = styled.button`
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px;
-  border: 1px solid rgba(96, 165, 250, 0.16);
-  border-radius: 20px;
-  background: rgba(9, 17, 31, 0.78);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #dbe4e0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
   color: inherit;
   cursor: pointer;
   text-align: left;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.3);
+  }
+
+  @media (max-width: 640px) {
+    padding: 6px;
+    gap: 6px;
+    font-size: 0.88rem;
+  }
 `;
 
 const BrandLogo = styled.div`
-  width: 46px;
-  height: 46px;
+  width: 38px;
+  height: 38px;
   display: grid;
   place-items: center;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  background: rgba(96, 165, 250, 0.08);
   border: 1px solid rgba(96, 165, 250, 0.2);
+  flex-shrink: 0;
 `;
 
 const BrandCopy = styled.div`
@@ -117,26 +165,51 @@ const BrandCopy = styled.div`
 `;
 
 const BrandName = styled.div`
-  font-size: 1.08rem;
+  font-size: 0.92rem;
   font-weight: 800;
-  color: #f8fbff;
+  color: #0f172a;
 `;
 
 const BrandMeta = styled.div`
-  font-size: 0.78rem;
-  color: #8ea0bb;
+  font-size: 0.7rem;
+  color: #64748b;
 `;
 
 const SidebarSection = styled.section`
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: calc(100vh - 600px);
+  flex-shrink: 1;
+  
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: rgba(96, 165, 250, 0.3);
+    border-radius: 2px;
+  }
+
+  @media (max-width: 768px) {
+    gap: 4px;
+  }
+
+  @media (max-width: 640px) {
+    gap: 3px;
+  }
 `;
 
 const SidebarLabel = styled.div`
-  color: #8ea0bb;
+  color: #64748b;
   text-transform: uppercase;
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   letter-spacing: 0.08em;
   font-weight: 700;
 `;
@@ -144,23 +217,29 @@ const SidebarLabel = styled.div`
 const NavList = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 3px;
 `;
 
 const NavButton = styled.button<{ $active?: boolean }>`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 8px;
   width: 100%;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid ${({ $active }) => ($active ? "rgba(96, 165, 250, 0.5)" : "rgba(148, 163, 184, 0.16)")};
-  background: ${({ $active }) => ($active ? "rgba(37, 99, 235, 0.24)" : "rgba(8, 21, 35, 0.62)")};
-  color: ${({ $active }) => ($active ? "#eff6ff" : "#d6e3f3")};
+  padding: 7px 8px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  border: 1px solid ${({ $active }) => ($active ? "rgba(96, 165, 250, 0.4)" : "transparent")};
+  background: ${({ $active }) => ($active ? "rgba(96, 165, 250, 0.12)" : "transparent")};
+  color: ${({ $active }) => ($active ? "#1e40af" : "#475569")};
   cursor: pointer;
   text-align: left;
-  box-shadow: ${({ $active }) => ($active ? "0 12px 24px rgba(37, 99, 235, 0.18)" : "none")};
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(96, 165, 250, 0.08);
+    color: #1e40af;
+  }
 `;
 
 const NavCopy = styled.div`
@@ -171,50 +250,62 @@ const NavCopy = styled.div`
 `;
 
 const NavTitle = styled.div`
-  font-size: 0.92rem;
+  font-size: 0.84rem;
   font-weight: 700;
 `;
 
 const NavDescription = styled.div`
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   color: inherit;
-  opacity: 0.72;
+  opacity: 0.7;
 `;
 
 const NavArrow = styled.div`
   flex-shrink: 0;
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  opacity: 0.72;
+  opacity: 0.6;
+  font-weight: 600;
 `;
 
 const SidebarFooter = styled.div`
   margin-top: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #dbe4e0;
+  flex-shrink: 0;
 `;
 
 const UserCard = styled.div`
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  gap: 8px;
+  padding: 7px;
+  border-radius: 8px;
+  background: rgba(96, 165, 250, 0.06);
+  border: 1px solid rgba(96, 165, 250, 0.15);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: rgba(96, 165, 250, 0.1);
+  }
 `;
 
 const UserAvatar = styled.div`
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   font-weight: 800;
-  color: #081523;
-  background: linear-gradient(180deg, #cde4ff 0%, #8cc2ff 100%);
+  color: #ffffff;
+  background: linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%);
+  flex-shrink: 0;
+  font-size: 0.9rem;
 `;
 
 const UserCardCopy = styled.div`
@@ -225,29 +316,36 @@ const UserCardCopy = styled.div`
 `;
 
 const UserCardName = styled.div`
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   font-weight: 800;
-  color: #f8fbff;
+  color: #0f172a;
 `;
 
 const UserCardRole = styled.div`
-  font-size: 0.76rem;
-  color: #8ea0bb;
+  font-size: 0.7rem;
+  color: #64748b;
 `;
 
 const FooterActions = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 4px;
+  flex-shrink: 0;
 `;
 
 const FooterBtn = styled.button`
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(255, 255, 255, 0.04);
-  color: #e5eefc;
-  padding: 10px 12px;
-  border-radius: 12px;
+  border: 1px solid #dbe4e0;
+  background: rgba(255, 255, 255, 0.5);
+  color: #0f172a;
+  padding: 7px 8px;
+  border-radius: 8px;
   font-weight: 700;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.3);
+  }
 `;

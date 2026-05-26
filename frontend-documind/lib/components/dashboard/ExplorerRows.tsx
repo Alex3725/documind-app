@@ -5,6 +5,7 @@ import styled from "styled-components";
 import type { FileItem } from "@/lib/features/fileSlice";
 
 type FolderRowProps = {
+  folderId: number;
   icon: string;
   name: string;
   count: number;
@@ -14,9 +15,13 @@ type FolderRowProps = {
   onDragOver?: (e: React.DragEvent) => void;
   onDragLeave?: () => void;
   onDrop?: (e: React.DragEvent) => void;
+  onTrash?: () => void;
+  onMove?: () => void;
+  onCopy?: () => void;
 };
 
 export function ExplorerFolderRow({
+  folderId,
   icon,
   name,
   count,
@@ -26,9 +31,13 @@ export function ExplorerFolderRow({
   onDragOver,
   onDragLeave,
   onDrop,
+  onTrash,
+  onMove,
+  onCopy,
 }: FolderRowProps) {
   return (
     <FolderRow
+      data-folder-id={folderId}
       $color={color}
       $dropTarget={dropTarget}
       onDragOver={onDragOver}
@@ -39,6 +48,11 @@ export function ExplorerFolderRow({
       <FolderIcon>{icon}</FolderIcon>
       <FolderName>{name}</FolderName>
       <FolderCount>{count}</FolderCount>
+      <FolderActions>
+        {onMove && <ActionBtn type="button" onClick={(e) => { e.stopPropagation(); onMove(); }}>Sposta</ActionBtn>}
+        {onCopy && <ActionBtn type="button" onClick={(e) => { e.stopPropagation(); onCopy(); }}>Copia</ActionBtn>}
+        {onTrash && <DangerBtn type="button" onClick={(e) => { e.stopPropagation(); onTrash(); }}>Cestina</DangerBtn>}
+      </FolderActions>
       {dropTarget && <DropHint>⬇ Sposta qui</DropHint>}
     </FolderRow>
   );
@@ -141,6 +155,29 @@ const FolderCount = styled.span`
   background: #f0f0f0;
   border-radius: 999px;
   padding: 2px 8px;
+`;
+
+const FolderActions = styled.div`
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+`;
+
+const ActionBtn = styled.button`
+  border: 1px solid #dbe4e0;
+  background: #fff;
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
+const DangerBtn = styled(ActionBtn)`
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #b91c1c;
 `;
 
 const DropHint = styled.span`

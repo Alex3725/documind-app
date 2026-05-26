@@ -1,6 +1,7 @@
 package com.example.documind.entities.folders;
 
 import com.example.documind.configurations.exceptions.CustomException;
+import com.example.documind.dto.requests.FolderRelocateRequest;
 import com.example.documind.dto.requests.FolderTypeCreateRequest;
 import com.example.documind.dto.responses.FolderTypeResponse;
 import com.example.documind.security.tokens.Token;
@@ -62,7 +63,7 @@ public class FolderTypeService {
         validateRequest(request);
 
         String fullPath = buildFullPath(request);
-        if (folderTypeRepository.existsByFullPathAndOwner(fullPath, owner)) {
+        if (folderTypeRepository.existsByFullPathAndOwnerAndTrashedFalse(fullPath, owner)) {
             throw new CustomException(HttpStatus.CONFLICT, "FOLDER_EXISTS",
                     "Esiste già una cartella con questo percorso: " + fullPath);
         }
@@ -78,6 +79,8 @@ public class FolderTypeService {
         folder.setColor(request.getColor() != null ? request.getColor() : "#6b7280");
         folder.setAutoTags(request.getAutoTags() != null ? request.getAutoTags() : new ArrayList<>());
         folder.setAutoUpdateType(request.getAutoUpdateType() != null && request.getAutoUpdateType());
+        folder.setTrashed(false);
+        folder.setTrashedAt(null);
 
         FolderType saved = folderTypeRepository.save(folder);
         return toResponse(saved);
@@ -86,7 +89,16 @@ public class FolderTypeService {
     @Transactional(readOnly = true)
     public List<FolderTypeResponse> listFolders(String token) {
         String owner = requireOwner(token);
-        return folderTypeRepository.findAllByOwnerOrderByFullPathAsc(owner)
+        return folderTypeRepository.findAllByOwnerAndTrashedFalseOrderByFullPathAsc(owner)
+                .stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<FolderTypeResponse> listTrashedFolders(String token) {
+        String owner = requireOwner(token);
+        return folderTypeRepository.findAllByOwnerAndTrashedTrueOrderByUpdatedAtDesc(owner)
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -95,7 +107,7 @@ public class FolderTypeService {
     @Transactional(readOnly = true)
     public List<FolderTypeResponse> getRootFolders(String token) {
         String owner = requireOwner(token);
-        return folderTypeRepository.findAllByOwnerAndDepthOrderByNameAsc(owner, 0)
+        return folderTypeRepository.findAllByOwnerAndDepthAndTrashedFalseOrderByNameAsc(owner, 0)
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -104,7 +116,7 @@ public class FolderTypeService {
     @Transactional(readOnly = true)
     public List<FolderTypeResponse> getChildren(String token, String parentPath) {
         String owner = requireOwner(token);
-        return folderTypeRepository.findAllByOwnerAndParentPathOrderByNameAsc(owner, parentPath)
+        return folderTypeRepository.findAllByOwnerAndParentPathAndTrashedFalseOrderByNameAsc(owner, parentPath)
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -120,6 +132,10 @@ public class FolderTypeService {
         if (folder.isSystem()) {
             throw new CustomException(HttpStatus.FORBIDDEN, "FOLDER_SYSTEM",
                     "Non è possibile modificare cartelle di sistema.");
+        }
+        if (folder.isTrashed()) {
+            throw new CustomException(HttpStatus.CONFLICT, "FOLDER_TRASHED",
+                "Ripristina la cartella dal cestino prima di modificarla.");
         }
 
         if (StringUtils.hasText(request.getName())) {
@@ -160,7 +176,170 @@ public class FolderTypeService {
                     "Non è possibile eliminare cartelle di sistema.");
         }
 
-        folderTypeRepository.delete(folder);
+        trashSubtree(owner, folder.getFullPath());
+    }
+
+    @Transactional
+    public FolderTypeResponse restoreFolder(String token, Long folderId) {
+        String owner = requireOwner(token);
+        FolderType folder = folderTypeRepository.findByIdAndOwner(folderId, owner)
+                .orElseThrow(() -> new CustomException(HttpStatus.NOT_FOUND, "FOLDER_NOT_FOUND",
+                        "Cartella non trovata."));
+
+        if (!folder.isTrashed()) {
+            return toResponse(folder);
+        }
+
+        restoreSubtree(owner, folder.getFullPath());
+        return toResponse(folderTypeRepository.findByIdAndOwner(folderId, owner).orElseThrow());
+    }
+
+    @Transactional
+    public FolderTypeResponse moveFolder(String token, Long folderId, FolderRelocateRequest request) {
+        return relocateFolder(token, folderId, request, false);
+    }
+
+    @Transactional
+    public FolderTypeResponse copyFolder(String token, Long folderId, FolderRelocateRequest request) {
+        return relocateFolder(token, folderId, request, true);
+    }
+
+    private FolderTypeResponse relocateFolder(String token, Long folderId, FolderRelocateRequest request, boolean copy) {
+        String owner = requireOwner(token);
+        FolderType folder = folderTypeRepository.findByIdAndOwner(folderId, owner)
+                .orElseThrow(() -> new CustomException(HttpStatus.NOT_FOUND, "FOLDER_NOT_FOUND",
+                        "Cartella non trovata."));
+
+        if (folder.isSystem()) {
+            throw new CustomException(HttpStatus.FORBIDDEN, "FOLDER_SYSTEM",
+                    "Non è possibile spostare o copiare cartelle di sistema.");
+        }
+        if (folder.isTrashed()) {
+            throw new CustomException(HttpStatus.CONFLICT, "FOLDER_TRASHED",
+                    "Ripristina la cartella dal cestino prima di spostarla o copiarla.");
+        }
+
+        String targetParentPath = request != null && StringUtils.hasText(request.getTargetParentPath())
+                ? request.getTargetParentPath().trim()
+                : null;
+        String newName = request != null && StringUtils.hasText(request.getNewName())
+                ? request.getNewName().trim()
+                : folder.getName();
+
+        String targetFullPath = buildTargetPath(targetParentPath, newName);
+        if (folderTypeRepository.existsByFullPathAndOwnerAndTrashedFalse(targetFullPath, owner)) {
+            throw new CustomException(HttpStatus.CONFLICT, "FOLDER_EXISTS",
+                    "Esiste già una cartella attiva con questo percorso: " + targetFullPath);
+        }
+
+        if (!copy) {
+            relocateSubtree(owner, folder, targetParentPath, newName);
+            return toResponse(folderTypeRepository.findByIdAndOwner(folderId, owner).orElseThrow());
+        }
+
+        return duplicateSubtree(owner, folder, targetParentPath, newName);
+    }
+
+    private void trashSubtree(String owner, String rootPath) {
+        List<FolderType> subtree = folderTypeRepository.findSubtreeByOwnerAndFullPathPrefix(owner, rootPath);
+        for (FolderType item : subtree) {
+            item.setTrashed(true);
+            item.setTrashedAt(java.time.LocalDateTime.now());
+        }
+        folderTypeRepository.saveAll(subtree);
+    }
+
+    private void restoreSubtree(String owner, String rootPath) {
+        List<FolderType> subtree = folderTypeRepository.findTrashedSubtreeByOwnerAndFullPathPrefix(owner, rootPath);
+        for (FolderType item : subtree) {
+            if (folderTypeRepository.existsByFullPathAndOwnerAndTrashedFalse(item.getFullPath(), owner)) {
+                throw new CustomException(HttpStatus.CONFLICT, "FOLDER_EXISTS",
+                        "Non è possibile ripristinare perché esiste già una cartella attiva con percorso: " + item.getFullPath());
+            }
+            item.setTrashed(false);
+            item.setTrashedAt(null);
+        }
+        folderTypeRepository.saveAll(subtree);
+    }
+
+    private void relocateSubtree(String owner, FolderType folder, String targetParentPath, String newName) {
+        String sourcePrefix = folder.getFullPath();
+        String targetPrefix = buildTargetPath(targetParentPath, newName);
+        if (targetPrefix.startsWith(sourcePrefix + "/")) {
+            throw new CustomException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR",
+                    "Non puoi spostare una cartella dentro una sua sottocartella.");
+        }
+
+        List<FolderType> subtree = folderTypeRepository.findSubtreeByOwnerAndFullPathPrefix(owner, sourcePrefix);
+        for (FolderType item : subtree) {
+            String newFullPath = replacePrefix(item.getFullPath(), sourcePrefix, targetPrefix);
+            if (!newFullPath.equals(item.getFullPath()) && folderTypeRepository.existsByFullPathAndOwnerAndTrashedFalse(newFullPath, owner)) {
+                throw new CustomException(HttpStatus.CONFLICT, "FOLDER_EXISTS",
+                        "Esiste già una cartella attiva con percorso: " + newFullPath);
+            }
+        }
+
+        for (FolderType item : subtree) {
+            String newFullPath = replacePrefix(item.getFullPath(), sourcePrefix, targetPrefix);
+            item.setFullPath(newFullPath);
+            int lastSlash = newFullPath.lastIndexOf("/");
+            item.setParentPath(lastSlash > 0 ? newFullPath.substring(0, lastSlash) : null);
+            item.setName(extractName(newFullPath));
+            item.setDepth(newFullPath.split("/").length - 1);
+        }
+        folderTypeRepository.saveAll(subtree);
+    }
+
+    private FolderTypeResponse duplicateSubtree(String owner, FolderType folder, String targetParentPath, String newName) {
+        String sourcePrefix = folder.getFullPath();
+        String targetPrefix = buildTargetPath(targetParentPath, newName);
+        List<FolderType> subtree = folderTypeRepository.findSubtreeByOwnerAndFullPathPrefix(owner, sourcePrefix);
+        List<FolderType> clones = new ArrayList<>();
+
+        for (FolderType item : subtree) {
+            FolderType clone = new FolderType();
+            clone.setOwner(owner);
+            clone.setName(item == folder ? newName : extractName(replacePrefix(item.getFullPath(), sourcePrefix, targetPrefix)));
+            String newFullPath = replacePrefix(item.getFullPath(), sourcePrefix, targetPrefix);
+            clone.setFullPath(newFullPath);
+            int lastSlash = newFullPath.lastIndexOf("/");
+            clone.setParentPath(lastSlash > 0 ? newFullPath.substring(0, lastSlash) : null);
+            clone.setDescription(item.getDescription());
+            clone.setSemanticRules(item.getSemanticRules());
+            clone.setIcon(item.getIcon());
+            clone.setColor(item.getColor());
+            clone.setAutoTags(item.getAutoTags() == null ? new ArrayList<>() : new ArrayList<>(item.getAutoTags()));
+            clone.setAutoUpdateType(item.isAutoUpdateType());
+            clone.setSystem(false);
+            clone.setTrashed(false);
+            clone.setTrashedAt(null);
+            clones.add(clone);
+        }
+
+        FolderType saved = folderTypeRepository.saveAll(clones).get(0);
+        return toResponse(saved);
+    }
+
+    private String buildTargetPath(String targetParentPath, String name) {
+        if (!StringUtils.hasText(name)) {
+            throw new CustomException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Il nome della cartella è obbligatorio.");
+        }
+        if (StringUtils.hasText(targetParentPath)) {
+            return targetParentPath.trim() + "/" + name.trim();
+        }
+        return name.trim();
+    }
+
+    private String replacePrefix(String fullPath, String sourcePrefix, String targetPrefix) {
+        if (fullPath.equals(sourcePrefix)) {
+            return targetPrefix;
+        }
+        return targetPrefix + fullPath.substring(sourcePrefix.length());
+    }
+
+    private String extractName(String fullPath) {
+        int idx = fullPath.lastIndexOf("/");
+        return idx >= 0 ? fullPath.substring(idx + 1) : fullPath;
     }
 
     // =====================================================
@@ -175,7 +354,7 @@ public class FolderTypeService {
      */
     @Transactional(readOnly = true)
     public java.util.Map<String, String> buildAITypeDescriptions(String owner) {
-        List<FolderType> folders = folderTypeRepository.findAllByOwnerOrderByFullPathAsc(owner);
+        List<FolderType> folders = folderTypeRepository.findAllByOwnerAndTrashedFalseOrderByFullPathAsc(owner);
         Map<String, FolderType> byFullPath = folders.stream()
                 .filter(f -> StringUtils.hasText(f.getFullPath()))
                 .collect(Collectors.toMap(
@@ -325,7 +504,7 @@ public class FolderTypeService {
         List<FolderTypeResponse> created = new ArrayList<>();
 
         for (FolderType folder : foldersToCreate) {
-            if (!folderTypeRepository.existsByFullPathAndOwner(folder.getFullPath(), owner)) {
+            if (!folderTypeRepository.existsByFullPathAndOwnerAndTrashedFalse(folder.getFullPath(), owner)) {
                 FolderType saved = folderTypeRepository.save(folder);
                 created.add(toResponse(saved));
             }
@@ -344,7 +523,7 @@ public class FolderTypeService {
                 "Vista aggregata di tutti i file", "📂", "#6b7280")
         );
         for (FolderType sf : systemFolders) {
-            if (!folderTypeRepository.existsByFullPathAndOwner(sf.getFullPath(), owner)) {
+            if (!folderTypeRepository.existsByFullPathAndOwnerAndTrashedFalse(sf.getFullPath(), owner)) {
                 folderTypeRepository.save(sf);
             }
         }
@@ -485,6 +664,8 @@ public class FolderTypeService {
         r.setAutoTags(folder.getAutoTags() == null ? List.of() : new ArrayList<>(folder.getAutoTags()));
         r.setAutoUpdateType(folder.isAutoUpdateType());
         r.setSystem(folder.isSystem());
+        r.setTrashed(folder.isTrashed());
+        r.setTrashedAt(folder.getTrashedAt());
         r.setFileCount(folder.getFileCount());
         r.setDepth(folder.getDepth());
         r.setCreatedAt(folder.getCreatedAt());

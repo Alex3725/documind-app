@@ -4,9 +4,13 @@ import { useState, useCallback } from "react";
 import styled, { keyframes } from "styled-components";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import {
+  copyFolder,
+  moveFolder,
+  trashFolder,
   moveFileToFolder,
   overrideFileFolder,
   removeFile,
+  loadFolders,
 } from "@/lib/features/fileSlice";
 import ClassificationResult from "@/lib/components/ClassificationResult";
 import { ExplorerFileRowItem, ExplorerFolderRow } from "@/lib/components/dashboard/ExplorerRows";
@@ -38,6 +42,9 @@ export default function FileExplorer({
   const [search, setSearch] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [folderAction, setFolderAction] = useState<null | { mode: "move" | "copy"; folderId: number; folderName: string; sourcePath: string }>(null);
+  const [targetParentPath, setTargetParentPath] = useState("");
+  const [newFolderName, setNewFolderName] = useState("");
 
   // =====================================================
   // DRAG AND DROP
@@ -139,6 +146,33 @@ export default function FileExplorer({
     : "";
 
   const uncategorized = filteredFiles.filter((f) => f.folder === "Non classificati" || !f.folder);
+
+  const availableTargets = folders
+    .filter((f) => !f.system && !f.trashed)
+    .filter((f) => !folderAction || f.fullPath !== folderAction.sourcePath)
+    .filter((f) => !folderAction || !f.fullPath.startsWith(`${folderAction.sourcePath}/`));
+
+  const openFolderAction = (mode: "move" | "copy", folder: { id: number; name: string; fullPath: string }) => {
+    setFolderAction({ mode, folderId: folder.id, folderName: folder.name, sourcePath: folder.fullPath });
+    setTargetParentPath("");
+    setNewFolderName(folder.name);
+  };
+
+  const confirmFolderAction = async () => {
+    if (!folderAction) return;
+    if (folderAction.mode === "move") {
+      await dispatch(moveFolder({ folderId: folderAction.folderId, targetParentPath: targetParentPath || undefined, newName: newFolderName.trim() || undefined }));
+    } else {
+      await dispatch(copyFolder({ folderId: folderAction.folderId, targetParentPath: targetParentPath || undefined, newName: newFolderName.trim() || undefined }));
+    }
+    dispatch(loadFolders());
+    setFolderAction(null);
+  };
+
+  const trashCurrentFolder = async (folderId: number) => {
+    await dispatch(trashFolder(folderId));
+    dispatch(loadFolders());
+  };
 
   return (
     <ExplorerContainer>
@@ -283,6 +317,7 @@ export default function FileExplorer({
           {currentFolderFiles.length > 0 && (
             <ExplorerGroup>
               <ExplorerFolderRow
+                folderId={0}
                 icon="📄"
                 name="File in questa cartella"
                 count={currentFolderFiles.length}
@@ -313,6 +348,7 @@ export default function FileExplorer({
           {visibleFolders.map(({ folder, files: folderFiles }) => (
             <ExplorerGroup key={folder.id}>
               <ExplorerFolderRow
+                folderId={folder.id}
                 icon={folder.icon}
                 name={folder.name}
                 count={folderFiles.length}
@@ -322,6 +358,9 @@ export default function FileExplorer({
                 onDragOver={(e) => handleDragOver(e, folder.fullPath)}
                 onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, folder.fullPath)}
+                onMove={() => openFolderAction("move", folder)}
+                onCopy={() => openFolderAction("copy", folder)}
+                onTrash={() => trashCurrentFolder(folder.id)}
               />
 
               <ExplorerFiles>
@@ -353,6 +392,7 @@ export default function FileExplorer({
           {uncategorized.length > 0 && (
             <ExplorerGroup>
               <ExplorerFolderRow
+                folderId={0}
                 icon="🗂️"
                 name="Non classificati"
                 count={uncategorized.length}
@@ -383,6 +423,39 @@ export default function FileExplorer({
           )}
         </ExplorerView>
       )}
+
+      {folderAction && (
+        <ModalOverlay onClick={() => setFolderAction(null)}>
+          <ActionModal onClick={(e) => e.stopPropagation()}>
+            <ModalTitle>{folderAction.mode === "move" ? "Sposta cartella" : "Copia cartella"}</ModalTitle>
+            <Hint>Seleziona la cartella di destinazione. Vuoi spostare o copiare {folderAction.folderName}.</Hint>
+            <Input
+              placeholder="Nuovo nome opzionale"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+            />
+            <TargetsList>
+              <TargetBtn type="button" onClick={() => setTargetParentPath("")} $active={targetParentPath === ""}>
+                Root
+              </TargetBtn>
+              {availableTargets.map((folder) => (
+                <TargetBtn
+                  key={folder.id}
+                  type="button"
+                  onClick={() => setTargetParentPath(folder.fullPath)}
+                  $active={targetParentPath === folder.fullPath}
+                >
+                  {folder.fullPath}
+                </TargetBtn>
+              ))}
+            </TargetsList>
+            <ActionsRow>
+              <GhostBtn type="button" onClick={() => setFolderAction(null)}>Annulla</GhostBtn>
+              <PrimaryBtn type="button" onClick={confirmFolderAction} disabled={folderAction.mode !== "copy" && folderAction.mode !== "move"}>Conferma</PrimaryBtn>
+            </ActionsRow>
+          </ActionModal>
+        </ModalOverlay>
+      )}
     </ExplorerContainer>
   );
 }
@@ -400,6 +473,95 @@ const SearchInput = styled.input`flex:1;min-width:160px;border:1px solid #d0ddd9
 const ViewToggle = styled.div`display:flex;border:1px solid #d0ddd9;border-radius:10px;overflow:hidden;background:#fff;`;
 const ViewBtn = styled.button<{ $active: boolean }>`padding:8px 12px;border:none;cursor:pointer;font-size:1rem;background:${({ $active }) => $active ? "#f0faf5" : "transparent"};color:${({ $active }) => $active ? "#1b6f5c" : "#888"};&:hover{background:#f5f5f5;}`;
 const ClearFilter = styled.button`padding:7px 12px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;border-radius:999px;font-size:0.82rem;cursor:pointer;font-weight:600;&:hover{background:#fef3c7;}`;
+
+const ModalOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(248, 250, 252, 0.48);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+`;
+
+const ActionModal = styled.div`
+  width: min(92vw, 760px);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 18px;
+  border: 1px solid #dbe4e0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+`;
+
+const ModalTitle = styled.h3`
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+`;
+
+const Hint = styled.div`
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.4;
+`;
+
+const Input = styled.input`
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dbe4e0;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+`;
+
+const TargetsList = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+`;
+
+const TargetBtn = styled.button<{ $active: boolean }>`
+  border: 1px solid ${({ $active }) => ($active ? "#2563eb" : "#dbe4e0")};
+  background: ${({ $active }) => ($active ? "rgba(37, 99, 235, 0.08)" : "#fff")};
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
+const ActionsRow = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+`;
+
+const GhostBtn = styled.button`
+  border: 1px solid #dbe4e0;
+  background: #fff;
+  color: #0f172a;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
+const PrimaryBtn = styled.button`
+  border: none;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-weight: 800;
+  cursor: pointer;
+`;
 
 // DROP ZONES
 const DropZonesRow = styled.div`display:flex;flex-wrap:wrap;gap:8px;`;

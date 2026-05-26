@@ -23,7 +23,7 @@ import java.util.List;
 @Entity
 @Table(
     name = "folder_types",
-    uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "full_path"})
+    uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "full_path", "is_trashed"})
 )
 @NoArgsConstructor
 @Getter
@@ -106,6 +106,15 @@ public class FolderType {
      */
     @Column(name = "is_system")
     private boolean system = false;
+
+    /**
+     * Se true la cartella è nel cestino e non viene mostrata nelle viste attive.
+     */
+    @Column(name = "is_trashed")
+    private boolean trashed = false;
+
+    /** Timestamp di quando la cartella è stata spostata nel cestino. */
+    private LocalDateTime trashedAt;
 
     /** Numero di file nella cartella (cache) */
     @Column(name = "file_count")

@@ -1,6 +1,7 @@
 package com.example.documind.entities.folders;
 
 import com.example.documind.dto.requests.FolderTypeCreateRequest;
+import com.example.documind.dto.requests.FolderRelocateRequest;
 import com.example.documind.dto.responses.FolderTypeResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,9 +20,13 @@ import java.util.Map;
  * GET    /api/v1/folders              → lista tutte le cartelle
  * GET    /api/v1/folders/root         → solo cartelle radice
  * GET    /api/v1/folders/children     → figli di una cartella
+ * GET    /api/v1/folders/trash        → cartelle nel cestino
  * POST   /api/v1/folders              → crea nuova cartella
  * PATCH  /api/v1/folders/{id}         → aggiorna cartella
  * DELETE /api/v1/folders/{id}         → elimina cartella
+ * PATCH  /api/v1/folders/{id}/restore → ripristina cartella
+ * POST   /api/v1/folders/{id}/move    → sposta cartella
+ * POST   /api/v1/folders/{id}/copy    → copia cartella
  * POST   /api/v1/folders/seed/{profile} → crea struttura da profilo
  * GET    /api/v1/folders/ai-context   → contesto per l'AI
  */
@@ -40,6 +45,13 @@ public class FolderTypeController {
             @CookieValue(name = "authentication-token", required = false) String token
     ) {
         return ResponseEntity.ok(folderTypeService.listFolders(token));
+    }
+
+    @GetMapping("/trash")
+    public ResponseEntity<List<FolderTypeResponse>> listTrash(
+            @CookieValue(name = "authentication-token", required = false) String token
+    ) {
+        return ResponseEntity.ok(folderTypeService.listTrashedFolders(token));
     }
 
     @GetMapping("/root")
@@ -82,6 +94,32 @@ public class FolderTypeController {
     ) {
         folderTypeService.deleteFolder(token, folderId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/{folderId}/restore")
+    public ResponseEntity<FolderTypeResponse> restoreFolder(
+            @CookieValue(name = "authentication-token", required = false) String token,
+            @PathVariable Long folderId
+    ) {
+        return ResponseEntity.ok(folderTypeService.restoreFolder(token, folderId));
+    }
+
+    @PostMapping("/{folderId}/move")
+    public ResponseEntity<FolderTypeResponse> moveFolder(
+            @CookieValue(name = "authentication-token", required = false) String token,
+            @PathVariable Long folderId,
+            @RequestBody FolderRelocateRequest request
+    ) {
+        return ResponseEntity.ok(folderTypeService.moveFolder(token, folderId, request));
+    }
+
+    @PostMapping("/{folderId}/copy")
+    public ResponseEntity<FolderTypeResponse> copyFolder(
+            @CookieValue(name = "authentication-token", required = false) String token,
+            @PathVariable Long folderId,
+            @RequestBody FolderRelocateRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(folderTypeService.copyFolder(token, folderId, request));
     }
 
     /**

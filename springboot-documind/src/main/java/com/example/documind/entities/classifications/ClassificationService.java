@@ -384,7 +384,7 @@ public class ClassificationService {
 
     private Map<String, String> buildUserTypeDescriptions(String owner) {
         if (!StringUtils.hasText(owner)) return Map.of();
-        return folderTypeRepository.findAllByOwnerOrderByFullPathAsc(owner)
+        return folderTypeRepository.findAllByOwnerAndTrashedFalseOrderByFullPathAsc(owner)
                 .stream()
                 .filter(f -> StringUtils.hasText(f.getDescription()))
                 .collect(Collectors.toMap(
@@ -405,7 +405,7 @@ public class ClassificationService {
                         return result;
                     }
 
-                    List<com.example.documind.entities.folders.FolderType> folders = folderTypeRepository.findAllByOwnerOrderByFullPathAsc(owner)
+                    List<com.example.documind.entities.folders.FolderType> folders = folderTypeRepository.findAllByOwnerAndTrashedFalseOrderByFullPathAsc(owner)
                             .stream()
                             .filter(folder -> !folder.isSystem())
                             .collect(Collectors.toList());

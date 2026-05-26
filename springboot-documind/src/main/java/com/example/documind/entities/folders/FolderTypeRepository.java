@@ -11,17 +11,29 @@ import java.util.Optional;
 @Repository
 public interface FolderTypeRepository extends JpaRepository<FolderType, Long> {
 
-    List<FolderType> findAllByOwnerOrderByFullPathAsc(String owner);
+    List<FolderType> findAllByOwnerAndTrashedFalseOrderByFullPathAsc(String owner);
+
+    List<FolderType> findAllByOwnerAndTrashedTrueOrderByUpdatedAtDesc(String owner);
 
     Optional<FolderType> findByFullPathAndOwner(String fullPath, String owner);
 
     Optional<FolderType> findByIdAndOwner(Long id, String owner);
 
-    List<FolderType> findAllByOwnerAndParentPathOrderByNameAsc(String owner, String parentPath);
+    Optional<FolderType> findByIdAndOwnerAndTrashedFalse(Long id, String owner);
 
-    List<FolderType> findAllByOwnerAndDepthOrderByNameAsc(String owner, int depth);
+    List<FolderType> findAllByOwnerAndParentPathAndTrashedFalseOrderByNameAsc(String owner, String parentPath);
 
-    boolean existsByFullPathAndOwner(String fullPath, String owner);
+    List<FolderType> findAllByOwnerAndDepthAndTrashedFalseOrderByNameAsc(String owner, int depth);
+
+    boolean existsByFullPathAndOwnerAndTrashedFalse(String fullPath, String owner);
+
+    boolean existsByFullPathAndOwnerAndTrashedTrue(String fullPath, String owner);
+
+    @Query("SELECT f FROM FolderType f WHERE f.owner = :owner AND (f.fullPath = :rootPath OR f.fullPath LIKE CONCAT(:rootPath, '/%')) ORDER BY f.fullPath ASC")
+    List<FolderType> findSubtreeByOwnerAndFullPathPrefix(@Param("owner") String owner, @Param("rootPath") String rootPath);
+
+    @Query("SELECT f FROM FolderType f WHERE f.owner = :owner AND f.trashed = true AND (f.fullPath = :rootPath OR f.fullPath LIKE CONCAT(:rootPath, '/%')) ORDER BY f.fullPath ASC")
+    List<FolderType> findTrashedSubtreeByOwnerAndFullPathPrefix(@Param("owner") String owner, @Param("rootPath") String rootPath);
 
     void deleteAllByOwner(String owner);
 

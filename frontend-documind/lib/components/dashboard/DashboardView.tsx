@@ -22,10 +22,12 @@ import QuickActionsPanel from "@/lib/components/dashboard/QuickActionsPanel";
 import FoldersBoard from "@/lib/components/dashboard/FoldersBoard";
 import WorkspacePathBar from "@/lib/components/dashboard/WorkspacePathBar";
 import WorkspacePreviewCard from "@/lib/components/dashboard/WorkspacePreviewCard";
+import WorkspaceStatusPieCard from "@/lib/components/dashboard/WorkspaceStatusPieCard";
 import { useRouter } from "next/navigation";
 import { logoutState } from "@/lib/features/authSlice";
 import TutorialOverlay from "@/lib/components/TutorialOverlay";
 import GuidedCreateFolder from "@/lib/components/GuidedCreateFolder";
+import DashboardSidebar from "@/lib/components/dashboard/DashboardSidebar";
 
 type Props = {
   folderPathSegments?: string[];
@@ -177,6 +179,8 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     router.push(toDashboardUrl(folderFullPath));
   };
 
+  const activeSection = currentFolderPath ? `Folder: ${currentFolderPath}` : "Dashboard";
+
   const totalMemoryGb = 5.64;
   const usedMemoryGb = Math.min(totalMemoryGb, Math.max(0.08, files.length * 0.12));
 
@@ -213,95 +217,101 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
       )}
 
       <PageWrapper>
-        <TopUtilityBar
-          userName={user?.name}
-          onLogout={handleLogout}
-          onOpenTutorial={() => setShowTutorial(true)}
-        />
+        <Shell>
+          <DashboardSidebar
+            userName={user?.name}
+            userSurname={user?.surname}
+            onLogout={handleLogout}
+          />
 
-        <WorkspacePathBar
-          folderCount={folders.filter((f) => !f.system).length}
-          fileCount={files.length}
-          section={currentFolderPath || "cartelle"}
-        />
-
-        <SearchStrip value={searchTerm} onChange={setSearchTerm} />
-
-        <WorkspaceGrid>
-          <LeftCol>
-            <QuickActionsPanel
-              foldersCount={folders.filter((f) => !f.system).length}
-              onAddFolder={handleCreateFolder}
-              onAddType={() => router.push("/tags")}
-              onAddFile={handleAddFile}
+          <Main>
+            <TopUtilityBar
+              userName={user?.name}
+              sectionLabel={activeSection}
+              onLogout={handleLogout}
+              onOpenTutorial={() => setShowTutorial(true)}
+              onOpenSettings={() => router.push("/settings")}
             />
-            <MemoryCircleCard
-              totalGb={totalMemoryGb}
-              usedGb={usedMemoryGb}
+
+            <WorkspacePathBar
+              folderCount={folders.filter((f) => !f.system).length}
               fileCount={files.length}
+              section={currentFolderPath || "cartelle"}
             />
-          </LeftCol>
 
-          <CenterCol>
-            <FoldersBoard
-              searchTerm={searchTerm}
-              onSearchTermChange={setSearchTerm}
-              currentFolderPath={currentFolderPath}
-              onOpenFolder={handleOpenFolder}
-            />
-          </CenterCol>
+            <SearchStrip value={searchTerm} onChange={setSearchTerm} />
 
-          <RightRail>
-            <RailCard>
-              <RailTitle>Stato workspace</RailTitle>
-              <StatsRow>
-                <StatCard>
-                  <StatNum>{files.length}</StatNum>
-                  <StatLabel>File totali</StatLabel>
-                </StatCard>
-                <StatCard $accent="#1b6f5c">
-                  <StatNum>{statsClassified}</StatNum>
-                  <StatLabel>Classificati AI</StatLabel>
-                </StatCard>
-                {statsPending > 0 && (
-                  <StatCard $accent="#d97706">
-                    <StatNum>{statsPending}</StatNum>
-                    <StatLabel>In attesa</StatLabel>
-                  </StatCard>
+            <WorkspaceGrid>
+              <LeftCol>
+                <QuickActionsPanel
+                  foldersCount={folders.filter((f) => !f.system).length}
+                  onAddFolder={handleCreateFolder}
+                  onAddType={() => router.push("/tags")}
+                  onAddFile={handleAddFile}
+                />
+                <MemoryCircleCard
+                  totalGb={totalMemoryGb}
+                  usedGb={usedMemoryGb}
+                  fileCount={files.length}
+                />
+              </LeftCol>
+
+              <CenterCol>
+                <FoldersBoard
+                  searchTerm={searchTerm}
+                  onSearchTermChange={setSearchTerm}
+                  currentFolderPath={currentFolderPath}
+                  onOpenFolder={handleOpenFolder}
+                />
+              </CenterCol>
+
+              <RightRail>
+                <WorkspaceStatusPieCard
+                  totalFiles={files.length}
+                  classified={statsClassified}
+                  pending={statsPending}
+                  lowConfidence={statsLow}
+                  manual={statsManual}
+                />
+
+                <WorkspacePreviewCard text="Area riservata alla preview del contenuto del workspace." />
+
+                {status === "loading" && (
+                  <AnalyzingBanner>
+                    <AnalyzingSpinner />
+                    Analisi AI in corso — Classificazione gerarchica a 3 livelli...
+                  </AnalyzingBanner>
                 )}
-                <StatCard $accent="#6b7280">
-                  <StatNum>{statsLow}</StatNum>
-                  <StatLabel>Non classificati</StatLabel>
-                </StatCard>
-                {statsManual > 0 && (
-                  <StatCard $accent="#8b5cf6">
-                    <StatNum>{statsManual}</StatNum>
-                    <StatLabel>Manuale</StatLabel>
-                  </StatCard>
-                )}
-              </StatsRow>
-            </RailCard>
-
-            <WorkspacePreviewCard text="Area scura per contenuti, preview o immagine di rilievo." />
-
-            {status === "loading" && (
-              <AnalyzingBanner>
-                <AnalyzingSpinner />
-                Analisi AI in corso — Classificazione gerarchica a 3 livelli...
-              </AnalyzingBanner>
-            )}
-          </RightRail>
-        </WorkspaceGrid>
+              </RightRail>
+            </WorkspaceGrid>
+          </Main>
+        </Shell>
       </PageWrapper>
     </>
   );
 }
 
 const PageWrapper = styled.div`
+  min-height: calc(100vh - 48px);
+`;
+
+const Shell = styled.div`
+  display: grid;
+  grid-template-columns: minmax(260px, 308px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: calc(100vh - 48px);
+
+  @media (max-width: 1120px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const Main = styled.div`
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 8px 0 24px;
+  min-width: 0;
+  padding: 0 2px;
 `;
 
 const WorkspaceGrid = styled.div`
@@ -326,49 +336,6 @@ const RightRail = styled.div`
   display: grid;
   gap: 12px;
   min-width: 0;
-`;
-
-const RailCard = styled.section`
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid #dbe4e0;
-  border-radius: 18px;
-  padding: 14px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
-`;
-
-const RailTitle = styled.h3`
-  margin: 0 0 12px;
-  color: #0f172a;
-  font-size: 0.86rem;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-`;
-
-const StatsRow = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 10px;
-`;
-
-const StatCard = styled.div<{ $accent?: string }>`
-  background: #fff;
-  border: 1px solid #e5ede9;
-  border-radius: 14px;
-  padding: 14px;
-  text-align: center;
-  border-left: 4px solid ${({ $accent }) => $accent ?? "#e0e0e0"};
-`;
-
-const StatNum = styled.div`
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: #1a3a30;
-`;
-
-const StatLabel = styled.div`
-  font-size: 0.72rem;
-  color: #888;
-  margin-top: 2px;
 `;
 
 const AnalyzingBanner = styled.div`

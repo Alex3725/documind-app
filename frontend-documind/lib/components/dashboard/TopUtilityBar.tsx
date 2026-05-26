@@ -1,24 +1,33 @@
 "use client";
 
 import styled from "styled-components";
+import DocuMindLogo from "@/lib/components/DocuMindLogo";
 
 type Props = {
   userName?: string;
+  sectionLabel?: string;
   onLogout: () => void;
   onOpenTutorial: () => void;
+  onOpenSettings: () => void;
 };
 
-export default function TopUtilityBar({ userName, onLogout, onOpenTutorial }: Props) {
+export default function TopUtilityBar({
+  userName,
+  sectionLabel,
+  onLogout,
+  onOpenTutorial,
+  onOpenSettings,
+}: Props) {
   return (
     <Bar>
       <Left>
-        <BrandMark>
-          <BrandIcon>DM</BrandIcon>
-          <BrandText>
-            <BrandName>DocuMind</BrandName>
-            <BrandSubtitle>workspace</BrandSubtitle>
-          </BrandText>
-        </BrandMark>
+        <LogoMark>
+          <DocuMindLogo size={34} />
+        </LogoMark>
+        <SectionCopy>
+          <SectionEyebrow>Workspace</SectionEyebrow>
+          <SectionTitle>{sectionLabel ?? "Dashboard"}</SectionTitle>
+        </SectionCopy>
       </Left>
 
       <Right>
@@ -27,6 +36,7 @@ export default function TopUtilityBar({ userName, onLogout, onOpenTutorial }: Pr
           <UserName>{userName ?? "Utente"}</UserName>
         </UserChip>
         <ActionBtn type="button" onClick={onOpenTutorial}>Guida</ActionBtn>
+        <ActionBtn type="button" onClick={onOpenSettings}>Settings</ActionBtn>
         <LogoutBtn type="button" onClick={onLogout}>Logout</LogoutBtn>
       </Right>
     </Bar>
@@ -45,34 +55,36 @@ const Bar = styled.div`
   min-height: 72px;
 `;
 
-const Left = styled.div`display:flex;align-items:center;gap:12px;`;
-
-const BrandMark = styled.div`
+const Left = styled.div`
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  min-width: 0;
 `;
 
-const BrandIcon = styled.div`
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(180deg, #eef2ff, #c7d2fe);
-  color: #1f2937;
-  font-weight: 900;
-  font-size: 0.72rem;
+const LogoMark = styled.div`
+  flex-shrink: 0;
 `;
 
-const BrandText = styled.div`
+const SectionCopy = styled.div`
   display: flex;
   flex-direction: column;
   gap: 2px;
 `;
 
-const BrandName = styled.div`font-weight:800;color:#0f172a;font-size:0.98rem;`;
-const BrandSubtitle = styled.div`color:#64748b;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.08em;`;
+const SectionEyebrow = styled.div`
+  color: #64748b;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+`;
+
+const SectionTitle = styled.div`
+  font-weight: 800;
+  color: #0f172a;
+  font-size: 1rem;
+`;
 
 const Right = styled.div`display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;`;
 

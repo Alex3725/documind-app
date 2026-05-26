@@ -25,6 +25,7 @@ import WorkspacePreviewCard from "@/lib/components/dashboard/WorkspacePreviewCar
 import { useRouter } from "next/navigation";
 import { logoutState } from "@/lib/features/authSlice";
 import TutorialOverlay from "@/lib/components/TutorialOverlay";
+import GuidedCreateFolder from "@/lib/components/GuidedCreateFolder";
 
 type Props = {
   folderPathSegments?: string[];
@@ -57,6 +58,8 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showTutorial, setShowTutorial] = useState(false);
+  const [showGuidedCreate, setShowGuidedCreate] = useState(false);
+  const [guidedDefaultName, setGuidedDefaultName] = useState("");
 
   useEffect(() => {
     dispatch(loadFolders());
@@ -105,6 +108,13 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     localStorage.setItem("documind:folders", JSON.stringify(selectedFullPaths));
     setShowOnboarding(false);
     dispatch(loadFolders());
+    // Open guided creation of a folder for the user to try immediately.
+    if (selectedFullPaths.length > 0) {
+      const first = selectedFullPaths[0];
+      const parts = first.split("/").filter(Boolean);
+      setGuidedDefaultName(parts.length ? parts[parts.length - 1] : "");
+    }
+    setShowGuidedCreate(true);
   };
 
   const handleConfirmClassification = async (confirmedTags: string[], additionalTags: string[]) => {
@@ -194,6 +204,13 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
         />
       )}
       {showTutorial && <TutorialOverlay onClose={() => setShowTutorial(false)} />}
+      {showGuidedCreate && (
+        <GuidedCreateFolder
+          defaultName={guidedDefaultName}
+          onCreate={handleCreateFolder}
+          onClose={() => setShowGuidedCreate(false)}
+        />
+      )}
 
       <PageWrapper>
         <TopUtilityBar

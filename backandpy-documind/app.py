@@ -27,7 +27,7 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", 300))
 
-ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".md", ".csv", ".html"}
+ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".pptx", ".md", ".csv", ".html"}
 
 # =====================================================
 # DEFINIZIONI GERARCHIA AI (3 LIVELLI)
@@ -160,6 +160,34 @@ def extract_text_from_docx(path: str) -> str:
     return "\n".join(p.text for p in doc.paragraphs)
 
 
+def extract_text_from_pptx(path: str) -> str:
+    try:
+        from pptx import Presentation
+    except Exception:
+        # If python-pptx is not installed, raise ValueError to signal unsupported file
+        raise ValueError("Tipo file non consentito")
+
+    prs = Presentation(path)
+    texts = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            # Many shapes have a text attribute or text_frame
+            text = ""
+            if hasattr(shape, "text"):
+                try:
+                    text = shape.text or ""
+                except Exception:
+                    text = ""
+            elif hasattr(shape, "text_frame") and shape.text_frame is not None:
+                try:
+                    text = "\n".join(p.text for p in shape.text_frame.paragraphs if p.text)
+                except Exception:
+                    text = ""
+            if text:
+                texts.append(text)
+    return "\n".join(texts)
+
+
 def extract_text_from_any(path: str) -> str:
     if not allowed_file(path):
         raise ValueError("Tipo file non consentito")
@@ -168,6 +196,8 @@ def extract_text_from_any(path: str) -> str:
         return extract_text_from_pdf(path)
     elif ext == ".docx":
         return extract_text_from_docx(path)
+    elif ext == ".pptx":
+        return extract_text_from_pptx(path)
     else:
         return extract_text_from_txt(path)
 

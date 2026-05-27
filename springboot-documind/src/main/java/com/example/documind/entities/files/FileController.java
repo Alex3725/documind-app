@@ -1,7 +1,9 @@
 package com.example.documind.entities.files;
 
 import com.example.documind.dto.requests.FileCreateRequest;
+import com.example.documind.dto.requests.FileReorderRequest;
 import com.example.documind.dto.requests.FileUpdateRequest;
+import com.example.documind.dto.responses.FileReorderResponse;
 import com.example.documind.dto.responses.FileResponse;
 import com.example.documind.entities.files.type.FileCategory;
 import com.example.documind.entities.files.type.FileSemanticType;
@@ -73,6 +75,14 @@ public class FileController {
 	) {
 		FileResponse response = fileService.updateFile(token, fileId, request);
 		return ResponseEntity.ok(response);
+	}
+
+	@PostMapping("/reorder")
+	public ResponseEntity<FileReorderResponse> reorderFiles(
+			@CookieValue(name = "authentication-token", required = false) String token,
+			@RequestBody FileReorderRequest request
+	) {
+		return ResponseEntity.ok(fileService.reorderFiles(token, request));
 	}
 
 	@DeleteMapping("/{fileId}")

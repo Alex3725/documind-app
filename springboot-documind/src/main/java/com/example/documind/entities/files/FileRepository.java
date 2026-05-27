@@ -17,6 +17,7 @@ import java.util.Optional;
 @Repository
 public interface FileRepository extends JpaRepository<File, Long> {
     boolean existsByHash(String hash);
+    Optional<File> findByHash(String hash);
 
     Optional<File> findByIdAndOwner(Long id, String owner);
 

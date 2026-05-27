@@ -5,7 +5,7 @@ import styled from "styled-components";
 
 type Props = {
   defaultName?: string;
-  onCreate: (payload: { name: string; description: string; semanticRules: string; autoUpdateType: boolean; autoTags: string[] }) => Promise<void>;
+  onCreate: (payload: { name: string; description: string; semanticRules: string; autoUpdateType: boolean; autoTags: string[] }) => Promise<boolean>;
   onClose: () => void;
 };
 
@@ -26,14 +26,14 @@ export default function GuidedCreateFolder({ defaultName = "", onCreate, onClose
         .map((t) => t.trim().toLowerCase())
         .filter(Boolean);
 
-      await onCreate({
+      const created = await onCreate({
         name: name.trim(),
         description: description.trim(),
         semanticRules: semanticRules.trim(),
         autoUpdateType: autoUpdate,
         autoTags,
       });
-      onClose();
+      if (created) onClose();
     } finally {
       setBusy(false);
     }

@@ -1,0 +1,4 @@
+Istruzioni di esempio:
+1. Aprire il file.
+2. Leggere con attenzione.
+3. Aggiungere commenti dove necessario.

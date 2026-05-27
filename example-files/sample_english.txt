@@ -1,0 +1,3 @@
+Sample English text for testing:
+This is an example document to test multilingual extraction and classification.
+It contains simple sentences and a few keywords: leisure, poetry, game, test.

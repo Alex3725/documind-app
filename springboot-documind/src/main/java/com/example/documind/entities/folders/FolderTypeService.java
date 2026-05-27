@@ -7,6 +7,8 @@ import com.example.documind.dto.responses.FolderTypeResponse;
 import com.example.documind.security.tokens.Token;
 import com.example.documind.security.tokens.TokenRepository;
 import com.example.documind.security.tokens.TokenService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +38,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class FolderTypeService {
+
+    private static final Logger logger = LoggerFactory.getLogger(FolderTypeService.class);
 
     private static final Pattern REFERENCE_PATTERN = Pattern.compile("\\[\\[(folder|tag):([^\\]]+)\\]\\]", Pattern.CASE_INSENSITIVE);
 
@@ -176,6 +180,8 @@ public class FolderTypeService {
                     "Non è possibile eliminare cartelle di sistema.");
         }
 
+        logger.info("Deleting folder request: owner={}, folderId={}, fullPath={}, parentPath={}",
+            owner, folderId, folder.getFullPath(), folder.getParentPath());
         trashSubtree(owner, folder.getFullPath());
     }
 
@@ -242,6 +248,11 @@ public class FolderTypeService {
 
     private void trashSubtree(String owner, String rootPath) {
         List<FolderType> subtree = folderTypeRepository.findSubtreeByOwnerAndFullPathPrefix(owner, rootPath);
+        logger.info("Trash subtree match: owner={}, rootPath={}, matchedCount={}, matchedPaths={}",
+                owner,
+                rootPath,
+                subtree.size(),
+                subtree.stream().map(FolderType::getFullPath).collect(Collectors.toList()));
         for (FolderType item : subtree) {
             item.setTrashed(true);
             item.setTrashedAt(java.time.LocalDateTime.now());

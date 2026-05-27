@@ -10,7 +10,9 @@ import {
   loadTrashedFolders,
   createFolder,
   uploadAndAnalyze,
+  reorderFiles,
   addFileWithoutAnalysis,
+  type AnalysisResult,
 } from "@/lib/features/fileSlice";
 import ConfirmationPopup from "@/lib/components/ConfirmationPopup";
 import PrivacyConsentModal from "@/lib/components/PrivacyConsentModal";
@@ -23,6 +25,8 @@ import CreateActionsDropdown from "@/lib/components/dashboard/CreateActionsDropd
 import TrashBoard from "@/lib/components/dashboard/TrashBoard";
 import WorkspacePreviewCard from "@/lib/components/dashboard/WorkspacePreviewCard";
 import WorkspaceStatusPieCard from "@/lib/components/dashboard/WorkspaceStatusPieCard";
+import UploadAnalysisErrorPopup from "@/lib/components/UploadAnalysisErrorPopup";
+import ManualTagAssignmentPopup from "@/lib/components/ManualTagAssignmentPopup";
 import { useRouter } from "next/navigation";
 import { logoutState } from "@/lib/features/authSlice";
 import TutorialOverlay from "@/lib/components/TutorialOverlay";
@@ -60,25 +64,12 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     const collected = new Set<string>();
 
     for (const folder of folders) {
-      for (const tag of folder.autoTags ?? []) {
-        const normalized = tag.trim().toLowerCase();
-        if (normalized) collected.add(normalized);
-      }
-    }
-
-    for (const file of files) {
-      for (const tag of file.tags ?? []) {
-        const normalized = tag.trim().toLowerCase();
-        if (normalized) collected.add(normalized);
-      }
-      for (const tag of file.confirmedTags ?? []) {
-        const normalized = tag.trim().toLowerCase();
-        if (normalized) collected.add(normalized);
-      }
+      const folderName = folder.name.trim().toLowerCase();
+      if (folderName) collected.add(folderName);
     }
 
     return Array.from(collected).sort((a, b) => a.localeCompare(b));
-  }, [files, folders]);
+  }, [folders]);
 
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -86,6 +77,11 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showGuidedCreate, setShowGuidedCreate] = useState(false);
   const [guidedDefaultName, setGuidedDefaultName] = useState("");
+  const [uploadErrorFile, setUploadErrorFile] = useState<File | null>(null);
+  const [uploadErrorMessage, setUploadErrorMessage] = useState("");
+  const [uploadErrorCode, setUploadErrorCode] = useState<string | null>(null);
+  const [manualUploadFile, setManualUploadFile] = useState<File | null>(null);
+  const [showManualUploadPopup, setShowManualUploadPopup] = useState(false);
 
   useEffect(() => {
     dispatch(loadFolders());
@@ -158,6 +154,72 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     }));
   };
 
+  const handleRetryUploadAnalysis = async (selectedTags: string[]) => {
+    if (!uploadErrorFile) return;
+
+    const customTags = Object.fromEntries(selectedTags.map((tag) => [tag, tag]));
+    const result = await dispatch(uploadAndAnalyze({ file: uploadErrorFile, customTags }));
+
+    if (uploadAndAnalyze.rejected.match(result)) {
+      setUploadErrorMessage(result.payload?.message ?? "Impossibile analizzare il file.");
+      setUploadErrorCode(result.payload?.code ?? null);
+      return;
+    }
+
+    // Dopo l'upload con tag forzati, avvia subito il riordino per assegnare la cartella/tag
+    try {
+      const analysis = result.payload as AnalysisResult;
+      const fileId = analysis?.file_id;
+      const filename = analysis?.filename;
+      const suggestedFolder = analysis?.suggested_folder ?? "Non classificati";
+      const primaryTag = selectedTags && selectedTags.length > 0 ? selectedTags[0] : suggestedFolder;
+
+      if (fileId) {
+        const currentPath = `${suggestedFolder}/${filename}`.replace(/^\/+/, "");
+        const reorderResult = await dispatch(
+          reorderFiles({ files: [{ fileId: String(fileId), newTag: primaryTag, currentPath }] })
+        );
+
+        if (reorderFiles.rejected.match(reorderResult)) {
+          setUploadErrorMessage(reorderResult.payload?.message ?? "Errore durante il riordino del file.");
+          setUploadErrorCode(reorderResult.payload?.code ?? null);
+          return;
+        }
+      }
+
+      // Se tutto OK, chiudi il popup
+      setUploadErrorFile(null);
+      setUploadErrorMessage("");
+      setUploadErrorCode(null);
+    } catch {
+      setUploadErrorMessage("Errore interno durante il retry.");
+      setUploadErrorCode(null);
+      return;
+    }
+  };
+
+  const resolveFolderForManualTags = (tags: string[]) => {
+    const normalizedTag = tags[0]?.trim().toLowerCase();
+    if (!normalizedTag) return currentFolderPath || "Non classificati";
+
+    const matchedFolder = folders
+      .filter((folder) => !folder.system && !folder.trashed)
+      .filter((folder) => {
+        const folderName = folder.name.trim().toLowerCase();
+        const fullPath = folder.fullPath.trim().toLowerCase();
+        const autoTags = (folder.autoTags ?? []).map((tag) => tag.trim().toLowerCase());
+        return (
+          folderName === normalizedTag ||
+          fullPath === normalizedTag ||
+          fullPath.endsWith(`/${normalizedTag}`) ||
+          autoTags.includes(normalizedTag)
+        );
+      })
+      .sort((left, right) => right.fullPath.length - left.fullPath.length)[0];
+
+    return matchedFolder?.fullPath || currentFolderPath || "Non classificati";
+  };
+
   const handleLogout = async () => {
     await fetch("/api/auth/logout", {
       method: "POST",
@@ -173,7 +235,7 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     semanticRules: string;
     autoUpdateType: boolean;
     autoTags: string[];
-  }) => {
+  }): Promise<boolean> => {
     const result = await dispatch(
       createFolder({
         name: payload.name,
@@ -181,35 +243,66 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
         semanticRules: payload.semanticRules,
         autoUpdateType: payload.autoUpdateType,
         autoTags: payload.autoTags,
+        parentPath: currentFolderPath || undefined,
       })
     );
     if (createFolder.rejected.match(result)) {
-      throw new Error("Impossibile creare la cartella.");
+      window.alert(result.payload ?? "Impossibile creare la cartella.");
+      return false;
     }
+
+    return true;
   };
 
   const handleAddFile = async (file: File, runAnalysis: boolean) => {
     if (runAnalysis) {
       const result = await dispatch(uploadAndAnalyze({ file }));
       if (uploadAndAnalyze.rejected.match(result)) {
-        throw new Error("Impossibile analizzare il file.");
+        setUploadErrorFile(file);
+        setUploadErrorMessage(result.payload?.message ?? "Impossibile analizzare il file.");
+        setUploadErrorCode(result.payload?.code ?? null);
+        return;
       }
       return;
     }
 
+    setManualUploadFile(file);
+    setShowManualUploadPopup(true);
+  };
+
+  const handleManualUploadAssign = (tags: string[]) => {
+    if (!manualUploadFile) return;
+
     dispatch(
       addFileWithoutAnalysis({
-        filename: file.name,
-        folder: "Non classificati",
+        filename: manualUploadFile.name,
+        folder: resolveFolderForManualTags(tags),
+        tags,
       })
     );
+
+    setManualUploadFile(null);
+    setShowManualUploadPopup(false);
+  };
+
+  const handleManualUploadSkip = () => {
+    if (!manualUploadFile) return;
+
+    dispatch(
+      addFileWithoutAnalysis({
+        filename: manualUploadFile.name,
+        folder: currentFolderPath || "Non classificati",
+      })
+    );
+
+    setManualUploadFile(null);
+    setShowManualUploadPopup(false);
   };
 
   const handleOpenFolder = (folderFullPath: string) => {
     router.push(toDashboardUrl(folderFullPath));
   };
 
-  const activeSection = currentFolderPath ? `Folder: ${currentFolderPath}` : "Dashboard";
   const isTrashView = currentFolderPath === "cestino";
 
   const totalMemoryGb = 5.64;
@@ -244,6 +337,33 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
           defaultName={guidedDefaultName}
           onCreate={handleCreateFolder}
           onClose={() => setShowGuidedCreate(false)}
+        />
+      )}
+      {uploadErrorFile && (
+        <UploadAnalysisErrorPopup
+          fileName={uploadErrorFile.name}
+          errorMessage={uploadErrorMessage || "Impossibile analizzare il file."}
+          errorCode={uploadErrorCode}
+          availableTags={existingTags}
+          onRetry={handleRetryUploadAnalysis}
+          onSkip={() => {
+            setUploadErrorFile(null);
+            setUploadErrorMessage("");
+            setUploadErrorCode(null);
+          }}
+        />
+      )}
+
+      {showManualUploadPopup && manualUploadFile && (
+        <ManualTagAssignmentPopup
+          filename={manualUploadFile.name}
+          onAssign={handleManualUploadAssign}
+          onSkip={handleManualUploadSkip}
+          onCancel={() => {
+            setManualUploadFile(null);
+            setShowManualUploadPopup(false);
+          }}
+          availableTags={existingTags.map((t) => ({ name: t }))}
         />
       )}
 

@@ -11,9 +11,11 @@ import {
   overrideFileFolder,
   removeFile,
   loadFolders,
+  reorderFiles,
 } from "@/lib/features/fileSlice";
 import ClassificationResult from "@/lib/components/ClassificationResult";
 import { ExplorerFileRowItem, ExplorerFolderRow } from "@/lib/components/dashboard/ExplorerRows";
+import UntaggedSection from "@/lib/components/dashboard/UntaggedSection";
 
 type ViewMode = "grid" | "list" | "explorer";
 
@@ -71,20 +73,41 @@ export default function FileExplorer({
     setDragOverFolder(null);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent, targetFolderPath: string) => {
+  const handleDrop = useCallback(async (e: React.DragEvent, targetFolderPath: string) => {
     e.preventDefault();
     const fileId = e.dataTransfer.getData("text/plain") || draggingFileId;
     if (!fileId) return;
 
+    const file = files.find((entry) => entry.id === fileId);
     const targetFolder = folders.find((f) => f.fullPath === targetFolderPath);
     if (targetFolder) {
       dispatch(moveFileToFolder({ fileId, targetFolder }));
+
+      const currentPath = file ? `${file.folder?.trim() || ""}/${file.filename}`.replace(/^\/+/, "") : targetFolderPath;
+      const previousFolder = file?.folder ?? "";
+      const previousTags = file?.tags ?? [];
+
+      const result = await dispatch(
+        reorderFiles({
+          files: [
+            {
+              fileId,
+              newTag: targetFolder.name,
+              currentPath,
+            },
+          ],
+        })
+      );
+
+      if (reorderFiles.rejected.match(result) && file) {
+        dispatch(overrideFileFolder({ fileId, folder: previousFolder, tags: previousTags }));
+      }
     } else {
       dispatch(overrideFileFolder({ fileId, folder: targetFolderPath }));
     }
     setDragOverFolder(null);
     setDraggingFileId(null);
-  }, [dispatch, draggingFileId, folders]);
+  }, [dispatch, draggingFileId, files, folders]);
 
   // =====================================================
   // RENAME FILE (locale)
@@ -388,39 +411,19 @@ export default function FileExplorer({
             </ExplorerGroup>
           ))}
 
-          {/* Non classificati */}
-          {uncategorized.length > 0 && (
-            <ExplorerGroup>
-              <ExplorerFolderRow
-                folderId={0}
-                icon="🗂️"
-                name="Non classificati"
-                count={uncategorized.length}
-                color="#9ca3af"
-                dropTarget={false}
-                onOpen={() => setActiveFolder("Non classificati")}
-              />
-              <ExplorerFiles>
-                {uncategorized.map((file) => (
-                  <ExplorerFileRowItem
-                    key={file.id}
-                    file={file}
-                    dragging={draggingFileId === file.id}
-                    renaming={false}
-                    renameValue={renameValue}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                    onRenameStart={startRename}
-                    onRenameValueChange={setRenameValue}
-                    onRenameConfirm={confirmRename}
-                    onRenameCancel={() => setRenaming(null)}
-                    onDelete={(fileId) => dispatch(removeFile(fileId))}
-                    showTags={false}
-                  />
-                ))}
-              </ExplorerFiles>
-            </ExplorerGroup>
-          )}
+          <UntaggedSection
+            files={uncategorized}
+            draggingFileId={draggingFileId}
+            renameValue={renameValue}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            onRenameStart={startRename}
+            onRenameValueChange={setRenameValue}
+            onRenameConfirm={confirmRename}
+            onRenameCancel={() => setRenaming(null)}
+            onDelete={(fileId) => dispatch(removeFile(fileId))}
+            onOpen={() => setActiveFolder("Non classificati")}
+          />
         </ExplorerView>
       )}
 

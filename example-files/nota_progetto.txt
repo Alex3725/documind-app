@@ -1,0 +1,6 @@
+Note progetto:
+- Obiettivo: testare la classificazione automatica dei file.
+- Autore: Team DocuMind
+- Data: 2026-05-27
+
+Usare questo file per test di caricamento e controllo dei metadati.

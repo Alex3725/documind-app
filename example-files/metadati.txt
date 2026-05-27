@@ -1,0 +1,5 @@
+Metadati esempio:
+title: Destra Storica v2
+author: Autore Esempio
+tags: gioco, poesia, svago
+language: it

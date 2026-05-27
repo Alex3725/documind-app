@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState } from "react";
 import styled from "styled-components";
+import TagInput from "@/lib/components/TagInput";
 
 type AddFolderPayload = {
   name: string;
@@ -12,7 +13,7 @@ type AddFolderPayload = {
 };
 
 type Props = {
-  onAddFolder: (payload: AddFolderPayload) => Promise<void>;
+  onAddFolder: (payload: AddFolderPayload) => Promise<boolean>;
   onAddType: () => void;
   onAddFile: (file: File, runAnalysis: boolean) => Promise<void>;
   foldersCount: number;
@@ -23,7 +24,6 @@ export default function CreateActionsDropdown({
   onAddFolder,
   onAddType,
   onAddFile,
-  foldersCount,
   existingTags = [],
 }: Props) {
   const [isOpen, setIsOpen] = useState(false);
@@ -32,7 +32,6 @@ export default function CreateActionsDropdown({
   const [folderName, setFolderName] = useState("");
   const [folderDescription, setFolderDescription] = useState("");
   const [folderTags, setFolderTags] = useState("");
-  const [tagInput, setTagInput] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [busy, setBusy] = useState<"none" | "folder" | "file">("none");
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -42,60 +41,29 @@ export default function CreateActionsDropdown({
     .map((tag) => tag.trim().toLowerCase())
     .filter(Boolean);
 
-  const suggestionTags = existingTags.filter((tag) => {
-    const normalizedInput = tagInput.trim().toLowerCase();
-    if (!normalizedInput) return !selectedFolderTags.includes(tag);
-    return tag.includes(normalizedInput) && !selectedFolderTags.includes(tag);
-  }).slice(0, 8);
-
-  const commitTag = (tag: string) => {
-    const normalized = tag.trim().toLowerCase();
-    if (!normalized) return;
-    const nextTags = Array.from(new Set([...selectedFolderTags, normalized]));
-    setFolderTags(nextTags.join(", "));
-    setTagInput("");
-  };
-
-  const removeSelectedTag = (tag: string) => {
-    setFolderTags(selectedFolderTags.filter((item) => item !== tag).join(", "));
-  };
-
-  const handleTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter" || event.key === ",") {
-      event.preventDefault();
-      commitTag(tagInput);
-      return;
-    }
-
-    if (event.key === "Backspace" && !tagInput && selectedFolderTags.length > 0) {
-      removeSelectedTag(selectedFolderTags[selectedFolderTags.length - 1]);
-    }
-  };
-
   const handleAddFolder = async () => {
     if (folderName.trim().length < 2 || busy !== "none") return;
     setBusy("folder");
     try {
       const normalizedName = folderName.trim();
       const semanticRules = folderDescription.trim();
-      const autoTags = folderTags
-        .split(",")
-        .map((tag) => tag.trim().toLowerCase())
-        .filter(Boolean);
+      const autoTags = selectedFolderTags;
 
-      await onAddFolder({
+      const created = await onAddFolder({
         name: normalizedName,
         description: semanticRules,
         semanticRules,
         autoUpdateType: autoTags.length > 0,
         autoTags,
       });
-      setShowFolderModal(false);
-      setFolderName("");
-      setFolderDescription("");
-      setFolderTags("");
-      setTagInput("");
-      setIsOpen(false);
+
+      if (created) {
+        setShowFolderModal(false);
+        setFolderName("");
+        setFolderDescription("");
+        setFolderTags("");
+        setIsOpen(false);
+      }
     } finally {
       setBusy("none");
     }
@@ -156,7 +124,7 @@ export default function CreateActionsDropdown({
           <Modal onClick={(e) => e.stopPropagation()}>
             <ModalHeader>
               <ModalTitle>Nuova cartella</ModalTitle>
-              <ModalSubtitle>Usa la stessa base del popup upload, cambia solo il contenuto.</ModalSubtitle>
+              <ModalSubtitle>Usa solo tag già esistenti nel workspace.</ModalSubtitle>
             </ModalHeader>
             <ModalBody>
               <Input
@@ -168,54 +136,29 @@ export default function CreateActionsDropdown({
                 }}
                 autoFocus
               />
+
               <TagField>
                 <TagInput
-                  placeholder="Scrivi un tag e premi Invio"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={handleTagInputKeyDown}
+                  selected={selectedFolderTags.map((name) => ({ name }))}
+                  onChange={(tags) => setFolderTags(tags.map((tag) => tag.name).join(", "))}
+                  tags={existingTags.map((name) => ({ name }))}
+                  placeholder="#tag esistente"
+                  allowFreeText={false}
                 />
-                {selectedFolderTags.length > 0 && (
-                  <SelectedTagsRow>
-                    {selectedFolderTags.map((tag) => (
-                      <SelectedTagPill key={tag} type="button" onClick={() => removeSelectedTag(tag)}>
-                        <HashMark>#</HashMark>{tag}
-                        <RemoveTagIcon>×</RemoveTagIcon>
-                      </SelectedTagPill>
-                    ))}
-                  </SelectedTagsRow>
-                )}
-                {suggestionTags.length > 0 && (
-                  <SuggestionPanel>
-                    <SuggestionLabel>Tag già esistenti</SuggestionLabel>
-                    <SuggestionRow>
-                      {suggestionTags.map((tag) => (
-                        <SuggestionChip key={tag} type="button" onClick={() => commitTag(tag)}>
-                          <HashMark>#</HashMark>{tag}
-                        </SuggestionChip>
-                      ))}
-                    </SuggestionRow>
-                  </SuggestionPanel>
-                )}
               </TagField>
+
               <Textarea
                 placeholder="Descrizione semantica usata per trovare i file"
                 value={folderDescription}
                 onChange={(e) => setFolderDescription(e.target.value)}
               />
-              <Hint>
-                I tag vengono salvati senza il simbolo #. Quelli già presenti nel workspace compaiono come suggerimenti cliccabili.
-              </Hint>
+              <Hint>I tag vengono selezionati solo tra quelli già presenti nel workspace.</Hint>
             </ModalBody>
             <ModalActions>
               <GhostBtn type="button" onClick={() => setShowFolderModal(false)}>
                 Annulla
               </GhostBtn>
-              <PrimaryBtn
-                type="button"
-                onClick={handleAddFolder}
-                disabled={folderName.trim().length < 2 || busy !== "none"}
-              >
+              <PrimaryBtn type="button" onClick={handleAddFolder} disabled={folderName.trim().length < 2 || busy !== "none"}>
                 {busy === "folder" ? "Salvataggio..." : "Salva"}
               </PrimaryBtn>
             </ModalActions>
@@ -228,7 +171,7 @@ export default function CreateActionsDropdown({
           <Modal onClick={(e) => e.stopPropagation()}>
             <ModalHeader>
               <ModalTitle>Aggiungi file</ModalTitle>
-              <ModalSubtitle>Stesso contenitore del popup cartella, quindi niente sovrapposizioni in alto.</ModalSubtitle>
+              <ModalSubtitle>Stesso contenitore del popup cartella.</ModalSubtitle>
             </ModalHeader>
             <ModalBody>
               <Input type="file" onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)} />
@@ -238,18 +181,10 @@ export default function CreateActionsDropdown({
               <GhostBtn type="button" onClick={() => setShowFileModal(false)}>
                 Annulla
               </GhostBtn>
-              <PrimaryBtn
-                type="button"
-                onClick={() => handleAddFile(false)}
-                disabled={!selectedFile || busy !== "none"}
-              >
+              <PrimaryBtn type="button" onClick={() => handleAddFile(false)} disabled={!selectedFile || busy !== "none"}>
                 Carica senza analisi
               </PrimaryBtn>
-              <PrimaryBtn
-                type="button"
-                onClick={() => handleAddFile(true)}
-                disabled={!selectedFile || busy !== "none"}
-              >
+              <PrimaryBtn type="button" onClick={() => handleAddFile(true)} disabled={!selectedFile || busy !== "none"}>
                 Analizza e carica
               </PrimaryBtn>
             </ModalActions>
@@ -371,266 +306,99 @@ const Modal = styled.div`
   background: white;
   border-radius: 14px;
   padding: 18px;
-  width: min(92vw, 420px);
-  max-height: min(90vh, calc(100vh - 32px));
-  overflow: hidden;
+  width: min(92vw, 540px);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.2);
+  cursor: default;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-  cursor: default;
-
-  @media (max-width: 640px) {
-    width: min(96vw, 420px);
-    padding: 14px;
-    border-radius: 14px;
-  }
+  gap: 14px;
 `;
 
 const ModalHeader = styled.div`
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 12px;
-  flex-shrink: 0;
 `;
 
-const ModalSubtitle = styled.div`
-  font-size: 0.76rem;
-  line-height: 1.4;
-  color: #64748b;
+const ModalTitle = styled.h3`
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.05rem;
+`;
 
-  @media (max-width: 640px) {
-    font-size: 0.72rem;
-  }
+const ModalSubtitle = styled.p`
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.4;
 `;
 
 const ModalBody = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 0;
-  overflow-y: auto;
-  min-height: 0;
-  padding-top: 2px;
-`;
-
-const ModalTitle = styled.h2`
-  margin: 0;
-  font-size: 1.04rem;
-  font-weight: 800;
-  color: #0f172a;
-
-  @media (max-width: 640px) {
-    font-size: 0.96rem;
-  }
-`;
-
-const Input = styled.input`
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid #dbe4e0;
-  border-radius: 8px;
-  font-size: 0.88rem;
-  margin-bottom: 12px;
-  color: #0f172a;
-  box-sizing: border-box;
-
-  &::placeholder {
-    color: #94a3b8;
-  }
-
-  @media (max-width: 640px) {
-    padding: 10px 10px;
-    font-size: 0.86rem;
-    margin-bottom: 10px;
-  }
+  gap: 12px;
 `;
 
 const TagField = styled.div`
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 12px;
 `;
 
-const TagInput = styled.input`
+const Input = styled.input`
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #cfd8dc;
+  border: 1px solid #dbe4e0;
   border-radius: 10px;
-  font-size: 0.88rem;
-  color: #0f172a;
+  font-size: 0.9rem;
   box-sizing: border-box;
-
-  &::placeholder {
-    color: #94a3b8;
-  }
-`;
-
-const SelectedTagsRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-`;
-
-const SelectedTagPill = styled.button`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid rgba(59, 130, 246, 0.28);
-  border-radius: 999px;
-  background: rgba(59, 130, 246, 0.06);
-  color: #1d4ed8;
-  font-size: 0.8rem;
-  font-weight: 700;
-  cursor: pointer;
-`;
-
-const SuggestionPanel = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-`;
-
-const SuggestionLabel = styled.div`
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #64748b;
-  font-weight: 700;
-`;
-
-const SuggestionRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-`;
-
-const SuggestionChip = styled.button`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  border-radius: 999px;
-  background: #fff;
-  color: #0f172a;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-
-  &:hover {
-    border-color: rgba(59, 130, 246, 0.45);
-    background: rgba(59, 130, 246, 0.06);
-  }
-`;
-
-const HashMark = styled.span`
-  color: #2563eb;
-  font-weight: 900;
-`;
-
-const RemoveTagIcon = styled.span`
-  color: #64748b;
-  font-weight: 800;
 `;
 
 const Textarea = styled.textarea`
   width: 100%;
+  min-height: 100px;
+  resize: vertical;
   padding: 10px 12px;
   border: 1px solid #dbe4e0;
-  border-radius: 8px;
-  font-size: 0.88rem;
-  margin-bottom: 12px;
-  color: #0f172a;
-  resize: vertical;
-  min-height: 80px;
+  border-radius: 10px;
+  font-size: 0.9rem;
   box-sizing: border-box;
-  font-family: inherit;
-
-  &::placeholder {
-    color: #94a3b8;
-  }
-
-  @media (max-width: 640px) {
-    padding: 10px 10px;
-    font-size: 0.86rem;
-    min-height: 70px;
-    margin-bottom: 10px;
-  }
 `;
 
 const Hint = styled.div`
-  font-size: 0.76rem;
+  font-size: 0.78rem;
   color: #64748b;
   line-height: 1.4;
-  margin-bottom: 12px;
-
-  @media (max-width: 640px) {
-    font-size: 0.72rem;
-    margin-bottom: 10px;
-  }
 `;
 
 const ModalActions = styled.div`
   display: flex;
-  gap: 8px;
   justify-content: flex-end;
+  gap: 10px;
   flex-wrap: wrap;
-
-  @media (max-width: 640px) {
-    gap: 6px;
-  }
 `;
 
 const GhostBtn = styled.button`
-  padding: 8px 12px;
+  padding: 9px 14px;
+  border-radius: 9px;
   border: 1px solid #dbe4e0;
-  background: transparent;
+  background: #fff;
   color: #0f172a;
-  border-radius: 8px;
   font-weight: 700;
-  font-size: 0.8rem;
   cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-
-  &:hover {
-    background: #f8fafc;
-  }
-
-  @media (max-width: 640px) {
-    flex: 1;
-    padding: 10px 8px;
-    font-size: 0.78rem;
-  }
 `;
 
 const PrimaryBtn = styled.button`
-  padding: 8px 12px;
+  padding: 9px 14px;
+  border-radius: 9px;
   border: none;
-  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
-  border-radius: 8px;
-  font-weight: 700;
-  font-size: 0.8rem;
+  font-weight: 800;
   cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-
-  &:hover:not(:disabled) {
-    background: linear-gradient(135deg, #54a3f5 0%, #2d6edd 100%);
-  }
 
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
-  }
-
-  @media (max-width: 640px) {
-    flex: 1;
-    padding: 10px 8px;
-    font-size: 0.78rem;
   }
 `;

@@ -4,11 +4,17 @@ import com.example.documind.configurations.exceptions.CustomException;
 import com.example.documind.configurations.globals.mappers.FileMapper;
 import com.example.documind.configurations.globals.validators.FileValidator;
 import com.example.documind.dto.requests.FileCreateRequest;
+import com.example.documind.dto.requests.FileReorderItemRequest;
+import com.example.documind.dto.requests.FileReorderRequest;
 import com.example.documind.dto.requests.FileUpdateRequest;
+import com.example.documind.dto.responses.FileReorderResponse;
+import com.example.documind.dto.responses.FileReorderResult;
 import com.example.documind.dto.responses.FileResponse;
 import com.example.documind.entities.files.type.FileCategory;
 import com.example.documind.entities.files.type.FileSemanticType;
 import com.example.documind.entities.files.type.FileSubType;
+import com.example.documind.entities.folders.FolderType;
+import com.example.documind.entities.folders.FolderTypeRepository;
 import com.example.documind.entities.users.User;
 import com.example.documind.security.tokens.Token;
 import com.example.documind.security.tokens.TokenRepository;
@@ -16,41 +22,56 @@ import com.example.documind.security.tokens.TokenService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class FileService {
 	private final FileRepository fileRepository;
 	private final FileMapper fileMapper;
 	private final FileValidator fileValidator;
+	private final FolderTypeRepository folderTypeRepository;
 	private final TokenRepository tokenRepository;
 	private final TokenService tokenService;
+	private final TransactionTemplate transactionTemplate;
 
 	public FileService(
 			FileRepository fileRepository,
 			FileMapper fileMapper,
 			FileValidator fileValidator,
+			FolderTypeRepository folderTypeRepository,
 			TokenRepository tokenRepository,
-			TokenService tokenService
+			TokenService tokenService,
+			PlatformTransactionManager transactionManager
 	) {
 		this.fileRepository = fileRepository;
 		this.fileMapper = fileMapper;
 		this.fileValidator = fileValidator;
+		this.folderTypeRepository = folderTypeRepository;
 		this.tokenRepository = tokenRepository;
 		this.tokenService = tokenService;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
 	@Transactional
 	public FileResponse createFile(String token, FileCreateRequest request) {
 		String owner = requireOwnerFromToken(token);
 		validateCreateRequest(request);
-		if (fileRepository.existsByHash(request.getHash())) {
-			throw new CustomException(HttpStatus.CONFLICT, "FILE_HASH_CONFLICT", "A file with the same hash already exists.");
+		// Check for duplicate hash and return existing file (allows frontend to retry with tags)
+		if (StringUtils.hasText(request.getHash())) {
+			Optional<File> existing = fileRepository.findByHash(request.getHash());
+			if (existing.isPresent()) {
+				return fileMapper.toResponse(existing.get());
+			}
 		}
 
 		File file = fileMapper.toEntity(request);
@@ -75,25 +96,28 @@ public class FileService {
             throw new CustomException(HttpStatus.BAD_REQUEST, "OWNER_REQUIRED", "Owner must be provided when creating file by owner.");
         }
         validateCreateRequest(request);
-        if (fileRepository.existsByHash(request.getHash())) {
-            throw new CustomException(HttpStatus.CONFLICT, "FILE_HASH_CONFLICT", "A file with the same hash already exists.");
+        // Check for duplicate hash and return existing file if found (allows frontend to retry with tags)
+        if (StringUtils.hasText(request.getHash())) {
+            Optional<File> existing = fileRepository.findByHash(request.getHash());
+            if (existing.isPresent()) {
+                return fileMapper.toResponse(existing.get());
+            }
         }
 
         File file = fileMapper.toEntity(request);
         file.setOwner(owner);
-        file.setUploaderIp(uploaderIp);
-        file.setUploaderToken(uploaderToken);
-		if (!StringUtils.hasText(file.getFolderPath())) {
-			file.setFolderPath("Non classificati");
-		}
+        file.setTags(fileValidator.normalizeTags(request.getTags()));
+        if (!StringUtils.hasText(file.getFolderPath())) {
+            file.setFolderPath("Non classificati");
+        }
 
-		LocalDateTime now = LocalDateTime.now();
-		file.setUploadDate(now);
-		file.setLastModified(now);
-		file.setLastAccess(now);
+        LocalDateTime now = LocalDateTime.now();
+        file.setUploadDate(now);
+        file.setLastModified(now);
+        file.setLastAccess(now);
 
-		File saved = fileRepository.save(file);
-		return fileMapper.toResponse(saved);
+        File saved = fileRepository.save(file);
+        return fileMapper.toResponse(saved);
 	}
 
 	@Transactional(readOnly = true)
@@ -189,6 +213,41 @@ public class FileService {
 		file.setLastModified(LocalDateTime.now());
 		File saved = fileRepository.save(file);
 		return fileMapper.toResponse(saved);
+	}
+
+	public FileReorderResponse reorderFiles(String token, FileReorderRequest request) {
+		String owner = requireOwnerFromToken(token);
+		List<FileReorderResult> results = new ArrayList<>();
+		List<FileReorderItemRequest> items = request != null && request.getFiles() != null ? request.getFiles() : List.of();
+
+		for (FileReorderItemRequest item : items) {
+			try {
+				results.add(transactionTemplate.execute(status -> reorderSingleFile(owner, item)));
+			} catch (CustomException ex) {
+				results.add(new FileReorderResult(
+					item != null ? item.getFileId() : null,
+					normalizeTag(item != null ? item.getNewTag() : null),
+					item != null ? item.getCurrentPath() : null,
+					item != null ? item.getCurrentPath() : null,
+					"manual_review"
+				));
+			} catch (RuntimeException ex) {
+				results.add(new FileReorderResult(
+					item != null ? item.getFileId() : null,
+					normalizeTag(item != null ? item.getNewTag() : null),
+					item != null ? item.getCurrentPath() : null,
+					item != null ? item.getCurrentPath() : null,
+					"manual_review"
+				));
+			}
+		}
+
+		String status = results.stream().allMatch(r -> "moved".equals(r.getAction()) || "unchanged".equals(r.getAction()))
+				? "success"
+				: results.stream().anyMatch(r -> "moved".equals(r.getAction()) || "unchanged".equals(r.getAction()))
+					? "partial"
+					: "error";
+		return new FileReorderResponse(status, results);
 	}
 
 	@Transactional
@@ -292,5 +351,154 @@ public class FileService {
 		} catch (IllegalArgumentException ex) {
 			throw new CustomException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", ex.getMessage());
 		}
+	}
+
+	private FileReorderResult reorderSingleFile(String owner, FileReorderItemRequest item) {
+		if (item == null || !StringUtils.hasText(item.getFileId()) || !StringUtils.hasText(item.getNewTag()) || !StringUtils.hasText(item.getCurrentPath())) {
+			throw new CustomException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Invalid reorder payload.");
+		}
+
+		Long fileId;
+		try {
+			fileId = Long.parseLong(item.getFileId());
+		} catch (NumberFormatException ex) {
+			throw new CustomException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "File ID must be numeric.");
+		}
+
+		File file = fileRepository.findByIdAndOwner(fileId, owner)
+				.orElseThrow(() -> new CustomException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "File not found."));
+
+		String normalizedTag = normalizeTag(item.getNewTag());
+		String resolvedTag = resolveTagCandidate(owner, normalizedTag);
+		if (!StringUtils.hasText(resolvedTag)) {
+			return new FileReorderResult(item.getFileId(), normalizedTag, item.getCurrentPath(), item.getCurrentPath(), "manual_review");
+		}
+
+		String oldPath = StringUtils.hasText(item.getCurrentPath()) ? item.getCurrentPath().trim() : file.getPath();
+		String newPath = buildReorderedPath(oldPath, resolvedTag, file.getName());
+		if (!StringUtils.hasText(newPath)) {
+			throw new CustomException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Unable to build target path.");
+		}
+
+		if (newPath.equals(file.getPath()) || resolvedTag.equals(file.getFolderPath())) {
+			return new FileReorderResult(item.getFileId(), resolvedTag, oldPath, newPath, "unchanged");
+		}
+
+		file.setPath(newPath);
+		file.setFolderPath(resolvedTag);
+
+		List<String> nextTags = new ArrayList<>(fileValidator.normalizeTags(file.getTags()));
+		if (!nextTags.contains(resolvedTag)) {
+			nextTags.add(resolvedTag);
+		}
+		file.setTags(fileValidator.normalizeTags(nextTags));
+		file.setLastModified(LocalDateTime.now());
+
+		File saved = fileRepository.save(file);
+		return new FileReorderResult(item.getFileId(), resolvedTag, oldPath, saved.getPath(), "moved");
+	}
+
+	private String resolveTagCandidate(String owner, String normalizedTag) {
+		if (!StringUtils.hasText(normalizedTag)) {
+			return null;
+		}
+
+		Set<String> candidates = new LinkedHashSet<>();
+		for (FolderType folder : folderTypeRepository.findAllByOwnerAndTrashedFalseOrderByFullPathAsc(owner)) {
+			collectCandidate(candidates, folder.getName(), normalizedTag);
+			collectCandidate(candidates, folder.getFullPath(), normalizedTag);
+			if (folder.getAutoTags() != null) {
+				for (String tag : folder.getAutoTags()) {
+					collectCandidate(candidates, tag, normalizedTag);
+				}
+			}
+		}
+		for (File file : fileRepository.findAllByOwnerOrderByUploadDateDesc(owner)) {
+			if (file.getTags() == null) continue;
+			for (String tag : file.getTags()) {
+				collectCandidate(candidates, tag, normalizedTag);
+			}
+		}
+
+		List<String> sorted = new ArrayList<>(candidates);
+		Collections.sort(sorted);
+		List<String> matches = findPrefixMatches(sorted, normalizedTag);
+		if (matches.size() != 1) {
+			return null;
+		}
+		return matches.get(0);
+	}
+
+	private void collectCandidate(Set<String> candidates, String rawTag, String prefix) {
+		if (!StringUtils.hasText(rawTag)) {
+			return;
+		}
+		String normalized = normalizeTag(rawTag);
+		if (normalized.startsWith(prefix)) {
+			candidates.add(normalized);
+		}
+	}
+
+	private List<String> findPrefixMatches(List<String> sorted, String prefix) {
+		if (sorted.isEmpty() || !StringUtils.hasText(prefix)) {
+			return List.of();
+		}
+
+		int lo = 0;
+		int hi = sorted.size();
+		while (lo < hi) {
+			int mid = (lo + hi) >>> 1;
+			String midPrefix = sorted.get(mid).length() >= prefix.length() ? sorted.get(mid).substring(0, prefix.length()) : sorted.get(mid);
+			if (midPrefix.compareTo(prefix) < 0) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
+			}
+		}
+
+		List<String> matches = new ArrayList<>();
+		for (int i = lo; i < sorted.size(); i++) {
+			String value = sorted.get(i);
+			if (value.startsWith(prefix)) {
+				matches.add(value);
+			} else {
+				break;
+			}
+		}
+		return matches;
+	}
+
+	private String buildReorderedPath(String currentPath, String resolvedTag, String fileName) {
+		if (!StringUtils.hasText(currentPath) || !StringUtils.hasText(resolvedTag) || !StringUtils.hasText(fileName)) {
+			return null;
+		}
+
+		String normalizedPath = currentPath.trim().replace("\\", "/");
+		String normalizedFile = fileName.trim();
+		if (normalizedPath.endsWith("/" + normalizedFile)) {
+			String parentPath = normalizedPath.substring(0, normalizedPath.length() - normalizedFile.length() - 1);
+			int lastSlash = parentPath.lastIndexOf('/');
+			String rootPath = lastSlash >= 0 ? parentPath.substring(0, lastSlash) : "";
+			if (!StringUtils.hasText(rootPath)) {
+				return resolvedTag + "/" + normalizedFile;
+			}
+			return rootPath + "/" + resolvedTag + "/" + normalizedFile;
+		}
+
+		int lastSlash = normalizedPath.lastIndexOf('/');
+		String basePath = lastSlash >= 0 ? normalizedPath.substring(0, lastSlash) : "";
+		if (!StringUtils.hasText(basePath)) {
+			return resolvedTag + "/" + normalizedFile;
+		}
+		int secondLastSlash = basePath.lastIndexOf('/');
+		String rootPath = secondLastSlash >= 0 ? basePath.substring(0, secondLastSlash) : "";
+		if (!StringUtils.hasText(rootPath)) {
+			return resolvedTag + "/" + normalizedFile;
+		}
+		return rootPath + "/" + resolvedTag + "/" + normalizedFile;
+	}
+
+	private String normalizeTag(String tag) {
+		return StringUtils.hasText(tag) ? tag.trim().toLowerCase() : null;
 	}
 }

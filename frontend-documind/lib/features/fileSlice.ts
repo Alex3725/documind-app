@@ -51,6 +51,7 @@ export type FileItem = {
   id: string;
   filename: string;
   uploadedAt: string;
+  path?: string;
   analysisResult: AnalysisResult;
   confirmedTags?: string[];
   tags: string[];
@@ -183,6 +184,36 @@ export const confirmClassification = createAsyncThunk<
     });
   }
   return data as AnalysisResult;
+});
+
+export const reorderFiles = createAsyncThunk<
+  { status: string; results: Array<{ fileId: string; assignedTag: string; oldPath: string; newPath: string; action: string }> },
+  { files: Array<{ fileId: string; newTag: string; currentPath: string }> },
+  { rejectValue: { message: string; code: string | null } }
+>("files/reorderFiles", async (payload, thunkApi) => {
+  const response = await fetch("/api/files/reorder", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await response.text();
+  let data: unknown = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return thunkApi.rejectWithValue({ message: text.trim() || "Risposta non valida.", code: "PARSE_ERROR" });
+  }
+
+  if (!response.ok) {
+    return thunkApi.rejectWithValue({
+      message: extractMsg(data, "Errore durante il riordino del file."),
+      code: extractCode(data),
+    });
+  }
+
+  return data as { status: string; results: Array<{ fileId: string; assignedTag: string; oldPath: string; newPath: string; action: string }> };
 });
 
 export const loadFolders = createAsyncThunk<
@@ -326,6 +357,15 @@ const fileSlice = createSlice({
         file.overrideFolder = folder;
       }
     },
+    updateFileLocation(state, action: PayloadAction<{ fileId: string; folder: string; path?: string; tags?: string[] }>) {
+      const { fileId, folder, path, tags } = action.payload;
+      const file = state.files.find((f) => f.id === fileId);
+      if (file) {
+        file.folder = folder;
+        if (path) file.path = path;
+        if (tags) file.tags = tags;
+      }
+    },
     /** Sovrascrive manualmente la cartella/tipo di un file */
     overrideFileFolder(state, action: PayloadAction<{ fileId: string; folder: string; tags?: string[] }>) {
       const { fileId, folder, tags } = action.payload;
@@ -449,6 +489,22 @@ const fileSlice = createSlice({
         state.errorCode = action.payload?.code ?? null;
       })
 
+      .addCase(reorderFiles.fulfilled, (state, action) => {
+        for (const result of action.payload.results) {
+          const file = state.files.find((entry) => entry.id === result.fileId);
+          if (!file) continue;
+          const nextTags = Array.from(new Set([...(file.tags ?? []), result.assignedTag].filter(Boolean)));
+          file.tags = nextTags;
+          file.path = result.newPath;
+          const segments = result.newPath.split("/").filter(Boolean);
+          file.folder = segments.length > 1 ? segments.slice(0, -1).join("/") : result.assignedTag;
+        }
+      })
+      .addCase(reorderFiles.rejected, (state, action) => {
+        state.error = action.payload?.message ?? "Errore durante il riordino.";
+        state.errorCode = action.payload?.code ?? null;
+      })
+
       // FOLDERS
       .addCase(loadFolders.pending, (state) => { state.foldersStatus = "loading"; })
       .addCase(loadFolders.fulfilled, (state, action) => {
@@ -481,6 +537,7 @@ export const {
   clearPendingAnalysis,
   removeFile,
   updateFileTags,
+  updateFileLocation,
   overrideFileFolder,
   moveFileToFolder,
   clearError,

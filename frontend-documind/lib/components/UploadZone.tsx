@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import styled, { css, keyframes } from "styled-components";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
-import { uploadAndAnalyze, clearError } from "@/lib/features/fileSlice";
+import { uploadAndAnalyze, clearError, confirmClassification, addFileWithoutAnalysis } from "@/lib/features/fileSlice";
+import ManualTagAssignmentPopup from "./ManualTagAssignmentPopup";
 
 const ACCEPTED_TYPES = [
   "application/pdf",
@@ -18,12 +19,24 @@ const MAX_SIZE_MB = 50;
 
 export default function UploadZone() {
   const dispatch = useAppDispatch();
-  const { status, error } = useAppSelector((s) => s.files);
+  const { status, error, folders } = useAppSelector((s) => s.files);
   const [dragging, setDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [manualTagsAssigned, setManualTagsAssigned] = useState(false);
+  const [showManualPopup, setShowManualPopup] = useState(false);
+  const [failedFile, setFailedFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isLoading = status === "loading";
+  const hasFailed = status === "failed" && error !== null;
+
+  // Mostra il popup quando l'analisi fallisce
+  useEffect(() => {
+    if (hasFailed && selectedFile) {
+      setShowManualPopup(true);
+      setFailedFile(selectedFile);
+    }
+  }, [hasFailed, selectedFile]);
 
   const validateFile = (file: File): string | null => {
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
@@ -67,12 +80,38 @@ export default function UploadZone() {
   const handleAnalyze = async () => {
     if (!selectedFile || isLoading) return;
     dispatch(clearError());
+    setManualTagsAssigned(false);
     await dispatch(uploadAndAnalyze({ file: selectedFile }));
     setSelectedFile(null);
   };
 
+  const handleAssignManualTags = async (tags: string[]) => {
+    if (!failedFile) return;
+    
+    // Crea il file senza analisi AI, assegnando i tag manualmente
+    dispatch(addFileWithoutAnalysis({
+      filename: failedFile.name,
+      tags,
+    }));
+
+    setShowManualPopup(false);
+    setFailedFile(null);
+    setManualTagsAssigned(true);
+    dispatch(clearError());
+  };
+
+  const handleReorder = () => {
+    if (manualTagsAssigned) {
+      // Reload la pagina o effettua il riordino
+      window.location.reload();
+    }
+  };
+
   const handleCancel = () => {
     setSelectedFile(null);
+    setShowManualPopup(false);
+    setFailedFile(null);
+    setManualTagsAssigned(false);
     dispatch(clearError());
   };
 
@@ -112,6 +151,20 @@ export default function UploadZone() {
             </>
           )}
         </DropZone>
+      ) : manualTagsAssigned ? (
+        <FilePreview>
+          <FileIcon>✓</FileIcon>
+          <FileInfo>
+            <FileName>Tag assegnati manualmente</FileName>
+            <FileSize>{selectedFile.name}</FileSize>
+          </FileInfo>
+          <PreviewActions>
+            <CancelBtn onClick={handleCancel}>✕</CancelBtn>
+            <AnalyzeBtn onClick={handleReorder}>
+              🔄 Riordina
+            </AnalyzeBtn>
+          </PreviewActions>
+        </FilePreview>
       ) : (
         <FilePreview>
           <FileIcon>{getFileIcon(selectedFile.name)}</FileIcon>
@@ -128,12 +181,26 @@ export default function UploadZone() {
         </FilePreview>
       )}
 
-      {error && (
+      {error && !showManualPopup && (
         <ErrorBanner>
           <span>⚠️</span>
           <span>{error}</span>
           <button onClick={() => dispatch(clearError())}>✕</button>
         </ErrorBanner>
+      )}
+
+      {showManualPopup && failedFile && (
+        <ManualTagAssignmentPopup
+          filename={failedFile.name}
+          onAssign={handleAssignManualTags}
+          onCancel={() => {
+            setShowManualPopup(false);
+            setFailedFile(null);
+            setSelectedFile(null);
+            dispatch(clearError());
+          }}
+          availableTags={folders?.map((f) => ({ name: f.name }))}
+        />
       )}
     </Container>
   );

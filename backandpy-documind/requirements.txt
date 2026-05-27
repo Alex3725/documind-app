@@ -5,3 +5,4 @@ requests
 ollama
 PyPDF2
 python-docx
+python-pptx

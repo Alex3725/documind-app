@@ -12,6 +12,7 @@ import {
   removeFile,
   loadFolders,
   reorderFiles,
+  uploadAndAnalyze,
 } from "@/lib/features/fileSlice";
 import ClassificationResult from "@/lib/components/ClassificationResult";
 import { ExplorerFileRowItem, ExplorerFolderRow } from "@/lib/components/dashboard/ExplorerRows";
@@ -168,6 +169,10 @@ export default function FileExplorer({
     ? folders.find((f) => f.fullPath === normalizedCurrentFolderPath)?.parentPath ?? ""
     : "";
 
+  const currentFolder = normalizedCurrentFolderPath
+    ? folders.find((f) => f.fullPath === normalizedCurrentFolderPath) ?? null
+    : null;
+
   const uncategorized = filteredFiles.filter((f) => f.folder === "Non classificati" || !f.folder);
 
   const availableTargets = folders
@@ -196,6 +201,76 @@ export default function FileExplorer({
     await dispatch(trashFolder(folderId));
     dispatch(loadFolders());
   };
+
+  const doDownloadUrl = useCallback((url: string) => {
+    const link = document.createElement("a");
+    link.href = url;
+    link.rel = "noreferrer";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, []);
+
+  const startDownload = useCallback(async (url: string) => {
+    // If it's a manual-only file, prompt user to pick the original file,
+    // upload it to the backend and then download the saved resource.
+    try {
+      const matches = url.match(/\/api\/files\/(manual-[^\/]+)\/download/);
+      if (matches && matches[1]) {
+        const manualId = matches[1];
+        const manualFile = files.find((f) => f.id === manualId);
+        if (!manualFile) {
+          window.alert("File manuale non trovato nella lista.");
+          return;
+        }
+
+        // Ask user to select the original file to upload
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "*/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+        input.click();
+
+        input.onchange = async () => {
+          const file = input.files?.[0];
+          document.body.removeChild(input);
+          if (!file) return;
+
+          if (file.name !== manualFile.filename) {
+            const proceed = window.confirm(
+              `Hai selezionato \"${file.name}\" ma il nome previsto è \"${manualFile.filename}\". Procedere comunque?`
+            );
+            if (!proceed) return;
+          }
+
+          const result = await dispatch(uploadAndAnalyze({ file }));
+          if (uploadAndAnalyze.rejected.match(result)) {
+            window.alert("Impossibile salvare il file sul server: " + (result.payload?.message ?? "Errore"));
+            return;
+          }
+
+          const payload = result.payload as any;
+          const savedId = payload?.saved_file_id ?? payload?.file_id ?? null;
+          // Remove the temporary manual entry
+          dispatch(removeFile(manualId));
+
+          if (savedId) {
+            doDownloadUrl(`/api/files/${savedId}/download`);
+          } else {
+            window.alert("File salvato ma non è stato possibile recuperare l'ID per il download.");
+          }
+        };
+
+        return;
+      }
+    } catch (e) {
+      // ignore regexp or other issues and fallback to direct download
+    }
+
+    doDownloadUrl(url);
+  }, [doDownloadUrl, files, dispatch]);
 
   return (
     <ExplorerContainer>
@@ -271,7 +346,7 @@ export default function FileExplorer({
                   onDragEnd={handleDragEnd}
                   $dragging={draggingFileId === file.id}
                 >
-                  <ClassificationResult file={file} />
+                  <ClassificationResult file={file} onDownload={() => startDownload(`/api/files/${file.id}/download`)} />
                 </DraggableCard>
               ))}
             </FilesGrid>
@@ -314,6 +389,7 @@ export default function FileExplorer({
                     {file.userOverride ? "👤" : file.analysisResult.type === "CLASSIFIED" ? "✅" : "🤔"}
                   </FileListStatus>
                   <FileListActions>
+                    <ListActionBtn type="button" onClick={() => startDownload(`/api/files/${file.id}/download`)}>⬇️</ListActionBtn>
                     <ListActionBtn onClick={() => dispatch(removeFile(file.id))}>🗑️</ListActionBtn>
                   </FileListActions>
                 </FileListRow>
@@ -325,9 +401,16 @@ export default function FileExplorer({
         /* VISTA EXPLORER — struttura ad albero */
         <ExplorerView>
           {normalizedCurrentFolderPath && (
-            <BackFolderBtn type="button" onClick={() => onOpenFolder?.(parentFolderPath)}>
-              ← Torna alla cartella superiore
-            </BackFolderBtn>
+            <FolderNavRow>
+              <BackFolderBtn type="button" onClick={() => onOpenFolder?.(parentFolderPath)}>
+                ← Torna alla cartella superiore
+              </BackFolderBtn>
+              {currentFolder && (
+                <DownloadFolderBtn type="button" onClick={() => startDownload(`/api/folders/${currentFolder.id}/download`)}>
+                  ⬇️ Scarica cartella
+                </DownloadFolderBtn>
+              )}
+            </FolderNavRow>
           )}
 
           {visibleFolders.length === 0 && currentFolderFiles.length === 0 && (
@@ -361,6 +444,7 @@ export default function FileExplorer({
                     onRenameValueChange={setRenameValue}
                     onRenameConfirm={confirmRename}
                     onRenameCancel={() => setRenaming(null)}
+                    onDownload={() => startDownload(`/api/files/${file.id}/download`)}
                     onDelete={(fileId) => dispatch(removeFile(fileId))}
                   />
                 ))}
@@ -381,6 +465,7 @@ export default function FileExplorer({
                 onDragOver={(e) => handleDragOver(e, folder.fullPath)}
                 onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, folder.fullPath)}
+                onDownload={() => startDownload(`/api/folders/${folder.id}/download`)}
                 onMove={() => openFolderAction("move", folder)}
                 onCopy={() => openFolderAction("copy", folder)}
                 onTrash={() => trashCurrentFolder(folder.id)}
@@ -403,6 +488,7 @@ export default function FileExplorer({
                       onRenameValueChange={setRenameValue}
                       onRenameConfirm={confirmRename}
                       onRenameCancel={() => setRenaming(null)}
+                      onDownload={() => startDownload(`/api/files/${file.id}/download`)}
                       onDelete={(fileId) => dispatch(removeFile(fileId))}
                     />
                   ))
@@ -598,6 +684,7 @@ const RenameInput = styled.input`border:1px solid #1b6f5c;border-radius:6px;padd
 
 // EXPLORER VIEW
 const ExplorerView = styled.div`display:flex;flex-direction:column;gap:12px;`;
+const FolderNavRow = styled.div`display:flex;flex-wrap:wrap;gap:8px;align-items:center;`;
 const BackFolderBtn = styled.button`
   align-self: flex-start;
   border: 1px solid #d0ddd9;
@@ -611,6 +698,20 @@ const BackFolderBtn = styled.button`
 
   &:hover {
     background: #f8fafc;
+  }
+`;
+const DownloadFolderBtn = styled.button`
+  border: 1px solid #d0ddd9;
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    background: #eef2f7;
   }
 `;
 const ExplorerGroup = styled.div`background:#fff;border:1px solid #e5ede9;border-radius:14px;overflow:hidden;`;

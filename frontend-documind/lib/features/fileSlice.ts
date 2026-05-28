@@ -161,6 +161,64 @@ export const uploadAndAnalyze = createAsyncThunk<
   return data as AnalysisResult;
 });
 
+export function uploadAndAnalyzeWithProgress(
+  file: File,
+  options?: {
+    customTags?: Record<string, string>;
+    onProgress?: (percentComplete: number) => void;
+  }
+): Promise<AnalysisResult> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (options?.customTags && Object.keys(options.customTags).length > 0) {
+      formData.append("custom_tags_for_analysis", JSON.stringify(options.customTags));
+    }
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/classify/analyze");
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+
+    xhr.upload.onprogress = (event) => {
+      if (!options?.onProgress || !event.lengthComputable) return;
+      options.onProgress(Math.min(100, Math.max(0, Math.round((event.loaded / event.total) * 100))));
+    };
+
+    xhr.onload = () => {
+      const text = xhr.responseText ?? "";
+      let data: unknown = null;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        reject({ message: text.trim() || "Risposta non valida.", code: "PARSE_ERROR" });
+        return;
+      }
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject({
+          message: extractMsg(data, "Errore durante l'analisi del file."),
+          code: extractCode(data),
+        });
+        return;
+      }
+
+      if (options?.onProgress) {
+        options.onProgress(100);
+      }
+
+      resolve(data as AnalysisResult);
+    };
+
+    xhr.onerror = () => {
+      reject({ message: "Impossibile contattare il backend.", code: "NETWORK_ERROR" });
+    };
+
+    xhr.send(formData);
+  });
+}
+
 export const confirmClassification = createAsyncThunk<
   AnalysisResult,
   { fileId: string; confirmedTags: string[]; additionalTags?: string[] },
@@ -406,17 +464,18 @@ const fileSlice = createSlice({
     },
     addFileWithoutAnalysis(
       state,
-      action: PayloadAction<{ filename: string; folder?: string; tags?: string[] }>
+      action: PayloadAction<{ id?: string; filename: string; folder?: string; tags?: string[] }>
     ) {
       const filename = action.payload.filename.trim();
       if (!filename) return;
 
       const fallbackFolder = action.payload.folder?.trim() || "Non classificati";
       const tags = action.payload.tags ?? [];
+      const fileId = action.payload.id ?? `manual-${Date.now()}`;
 
       const manualResult: AnalysisResult = {
         type: "LOW_CONFIDENCE",
-        file_id: `manual-${Date.now()}`,
+        file_id: fileId,
         filename,
         tags: tags.map((name) => ({ name, confidence: 1 })),
         assigned_tags: tags,
@@ -425,7 +484,7 @@ const fileSlice = createSlice({
       };
 
       state.files.unshift({
-        id: manualResult.file_id,
+        id: fileId,
         filename,
         uploadedAt: new Date().toISOString(),
         analysisResult: manualResult,

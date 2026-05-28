@@ -64,6 +64,8 @@ services:
       SPRING_DATASOURCE_PASSWORD: admin123
       SPRING_PROFILES_ACTIVE: dev
       APP_PYTHON_URL: http://python-backend:5001
+    volumes:
+      - spring_user_data:/app/user-data
     depends_on:
       db:
         condition: service_healthy
@@ -89,3 +91,4 @@ services:
 volumes:
   db_data:
   ollama_data:
+  spring_user_data:

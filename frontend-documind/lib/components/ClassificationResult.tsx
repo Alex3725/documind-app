@@ -11,7 +11,7 @@ import {
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import HierarchicalClassificationView from "@/lib/components/HierarchicalClassificationView";
 
-type Props = { file: FileItem };
+type Props = { file: FileItem; onDownload?: () => void };
 
 const CATEGORY_ICONS: Record<string, string> = {
   finance: "💰", legal: "⚖️", hr: "👤", personal: "🪪", health: "🏥",
@@ -27,7 +27,7 @@ const STATUS_CONFIG = {
   LOW_CONFIDENCE: { label: "Non classificato", color: "#6b7280", bg: "#f9fafb", border: "#d1d5db", icon: "🗂️" },
 };
 
-export default function ClassificationResult({ file }: Props) {
+export default function ClassificationResult({ file, onDownload }: Props) {
   const dispatch = useAppDispatch();
   const { folders } = useAppSelector((s) => s.files);
   const { analysisResult } = file;
@@ -92,6 +92,11 @@ export default function ClassificationResult({ file }: Props) {
           >
             ✏️
           </ActionIconBtn>
+          {onDownload && (
+            <ActionIconBtn onClick={onDownload} title="Scarica file">
+              ⬇️
+            </ActionIconBtn>
+          )}
           <DeleteBtn onClick={() => dispatch(removeFile(file.id))} title="Rimuovi">🗑️</DeleteBtn>
         </HeaderActions>
       </CardHeader>

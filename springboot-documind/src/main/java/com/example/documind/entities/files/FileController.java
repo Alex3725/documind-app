@@ -8,6 +8,7 @@ import com.example.documind.dto.responses.FileResponse;
 import com.example.documind.entities.files.type.FileCategory;
 import com.example.documind.entities.files.type.FileSemanticType;
 import com.example.documind.entities.files.type.FileSubType;
+import org.springframework.core.io.Resource;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -65,6 +66,14 @@ public class FileController {
 	) {
 		FileResponse response = fileService.getById(token, fileId);
 		return ResponseEntity.ok(response);
+	}
+
+	@GetMapping("/{fileId}/download")
+	public ResponseEntity<Resource> downloadFile(
+			@CookieValue(name = "authentication-token", required = false) String token,
+			@PathVariable Long fileId
+	) {
+		return fileService.downloadFile(token, fileId);
 	}
 
 	@PatchMapping("/{fileId}")

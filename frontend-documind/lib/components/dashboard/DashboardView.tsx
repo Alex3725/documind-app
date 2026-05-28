@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import styled, { keyframes } from "styled-components";
+import styled from "styled-components";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import {
   confirmClassification,
@@ -10,6 +10,7 @@ import {
   loadTrashedFolders,
   createFolder,
   uploadAndAnalyze,
+  uploadAndAnalyzeWithProgress,
   reorderFiles,
   addFileWithoutAnalysis,
   type AnalysisResult,
@@ -37,6 +38,26 @@ type Props = {
   folderPathSegments?: string[];
 };
 
+function ClientUserGreeting({ userName, userSurname }: { userName?: string; userSurname?: string }) {
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  return (
+    <UserGreeting>
+      {isMounted ? (
+        <>
+          Ciao, <strong>{userName || "Utente"} {userSurname || ""}</strong>
+        </>
+      ) : (
+        <span style={{ opacity: 0 }}>placeholder</span>
+      )}
+    </UserGreeting>
+  );
+}
+
 function toFullPath(segments: string[]): string {
   return segments.map((s) => decodeURIComponent(s)).join("/");
 }
@@ -55,7 +76,7 @@ function toDashboardUrl(fullPath: string): string {
 export default function DashboardView({ folderPathSegments = [] }: Props) {
   const router = useRouter();
   const dispatch = useAppDispatch();
-  const { files, pendingAnalysis, status, folders } = useAppSelector((s) => s.files);
+  const { files, pendingAnalysis, folders } = useAppSelector((s) => s.files);
   const user = useAppSelector((s) => s.auth.user);
 
   const currentFolderPath = useMemo(() => toFullPath(folderPathSegments), [folderPathSegments]);
@@ -82,6 +103,7 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
   const [uploadErrorCode, setUploadErrorCode] = useState<string | null>(null);
   const [manualUploadFile, setManualUploadFile] = useState<File | null>(null);
   const [showManualUploadPopup, setShowManualUploadPopup] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   useEffect(() => {
     dispatch(loadFolders());
@@ -136,12 +158,7 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     localStorage.setItem("documind:folders", JSON.stringify(selectedFullPaths));
     setShowOnboarding(false);
     dispatch(loadFolders());
-    // Open guided creation of a folder for the user to try immediately.
-    if (selectedFullPaths.length > 0) {
-      const first = selectedFullPaths[0];
-      const parts = first.split("/").filter(Boolean);
-      setGuidedDefaultName(parts.length ? parts[parts.length - 1] : "");
-    }
+    setGuidedDefaultName("");
     setShowGuidedCreate(true);
   };
 
@@ -158,17 +175,23 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     if (!uploadErrorFile) return;
 
     const customTags = Object.fromEntries(selectedTags.map((tag) => [tag, tag]));
-    const result = await dispatch(uploadAndAnalyze({ file: uploadErrorFile, customTags }));
+    setUploadProgress(0);
 
-    if (uploadAndAnalyze.rejected.match(result)) {
-      setUploadErrorMessage(result.payload?.message ?? "Impossibile analizzare il file.");
-      setUploadErrorCode(result.payload?.code ?? null);
+    let analysis: AnalysisResult;
+    try {
+      analysis = await uploadAndAnalyzeWithProgress(uploadErrorFile, {
+        customTags,
+        onProgress: setUploadProgress,
+      });
+    } catch (error: any) {
+      setUploadProgress(null);
+      setUploadErrorMessage(error?.message ?? "Impossibile analizzare il file.");
+      setUploadErrorCode(error?.code ?? null);
       return;
     }
 
     // Dopo l'upload con tag forzati, avvia subito il riordino per assegnare la cartella/tag
     try {
-      const analysis = result.payload as AnalysisResult;
       const fileId = analysis?.file_id;
       const filename = analysis?.filename;
       const suggestedFolder = analysis?.suggested_folder ?? "Non classificati";
@@ -183,6 +206,7 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
         if (reorderFiles.rejected.match(reorderResult)) {
           setUploadErrorMessage(reorderResult.payload?.message ?? "Errore durante il riordino del file.");
           setUploadErrorCode(reorderResult.payload?.code ?? null);
+          setUploadProgress(null);
           return;
         }
       }
@@ -191,9 +215,11 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
       setUploadErrorFile(null);
       setUploadErrorMessage("");
       setUploadErrorCode(null);
+      setUploadProgress(null);
     } catch {
       setUploadErrorMessage("Errore interno durante il retry.");
       setUploadErrorCode(null);
+      setUploadProgress(null);
       return;
     }
   };
@@ -256,13 +282,17 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
 
   const handleAddFile = async (file: File, runAnalysis: boolean) => {
     if (runAnalysis) {
-      const result = await dispatch(uploadAndAnalyze({ file }));
-      if (uploadAndAnalyze.rejected.match(result)) {
+      setUploadProgress(0);
+      try {
+        await uploadAndAnalyzeWithProgress(file, { onProgress: setUploadProgress });
+      } catch (error: any) {
+        setUploadProgress(null);
         setUploadErrorFile(file);
-        setUploadErrorMessage(result.payload?.message ?? "Impossibile analizzare il file.");
-        setUploadErrorCode(result.payload?.code ?? null);
+        setUploadErrorMessage(error?.message ?? "Impossibile analizzare il file.");
+        setUploadErrorCode(error?.code ?? null);
         return;
       }
+      setUploadProgress(null);
       return;
     }
 
@@ -270,19 +300,78 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
     setShowManualUploadPopup(true);
   };
 
+  const [uploadingFileIds, setUploadingFileIds] = useState<Set<string>>(new Set());
+
   const handleManualUploadAssign = (tags: string[]) => {
     if (!manualUploadFile) return;
 
+    const folderPath = resolveFolderForManualTags(tags);
+    const primaryTag = tags[0] || folderPath;
+
+    // Close popup immediately and add file to UI with correct folder path
+    const manualId = `manual-${Date.now()}`;
     dispatch(
       addFileWithoutAnalysis({
+        id: manualId,
         filename: manualUploadFile.name,
-        folder: resolveFolderForManualTags(tags),
+        folder: folderPath,
         tags,
       })
     );
 
     setManualUploadFile(null);
     setShowManualUploadPopup(false);
+
+    // Track this file as uploading
+    setUploadingFileIds((prev) => new Set([...prev, manualId]));
+    setUploadProgress(0);
+
+    // Upload and reorder in background without blocking UI
+    const fileToUpload = manualUploadFile;
+    (async () => {
+      try {
+        const analysis = await uploadAndAnalyzeWithProgress(fileToUpload, {
+          onProgress: setUploadProgress,
+        });
+
+        // Upload succeeded, now reorder file to the correct folder path
+        const fileId = analysis?.file_id;
+        const filename = analysis?.filename;
+
+        if (fileId && filename) {
+          const currentPath = `${folderPath}/${filename}`.replace(/^\/+/, "");
+          await dispatch(
+            reorderFiles({
+              files: [
+                {
+                  fileId,
+                  newTag: primaryTag,
+                  currentPath,
+                },
+              ],
+            })
+          );
+        }
+
+        dispatch(removeFile(manualId));
+
+        // Done uploading, remove from tracking
+        setUploadingFileIds((prev) => {
+          const next = new Set(prev);
+          next.delete(manualId);
+          return next;
+        });
+        setUploadProgress(null);
+      } catch (error) {
+        // Clean up on any error
+        setUploadingFileIds((prev) => {
+          const next = new Set(prev);
+          next.delete(manualId);
+          return next;
+        });
+        setUploadProgress(null);
+      }
+    })();
   };
 
   const handleManualUploadSkip = () => {
@@ -382,6 +471,7 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
           <Main>
             {!isTrashView && (
               <TopActionsRow>
+                <ClientUserGreeting userName={user?.name} userSurname={user?.surname} />
                 <TopActionsSpacer />
                 <CreateActionsDropdown
                   foldersCount={folders.filter((f) => !f.system).length}
@@ -426,11 +516,16 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
 
                     <WorkspacePreviewCard text="Area riservata alla preview del contenuto del workspace." />
 
-                    {status === "loading" && (
-                      <AnalyzingBanner>
-                        <AnalyzingSpinner />
-                        Analisi AI in corso — Classificazione gerarchica a 3 livelli...
-                      </AnalyzingBanner>
+                    {uploadProgress !== null && (
+                      <UploadProgressBanner>
+                        <UploadProgressHeader>
+                          <UploadProgressTitle>Upload in corso</UploadProgressTitle>
+                          <UploadProgressLabel>Manca {Math.max(0, 100 - Math.round(uploadProgress))}%</UploadProgressLabel>
+                        </UploadProgressHeader>
+                        <UploadProgressTrack>
+                          <UploadProgressFill style={{ width: `${Math.min(100, Math.max(0, uploadProgress))}%` }} />
+                        </UploadProgressTrack>
+                      </UploadProgressBanner>
                     )}
                   </RightRail>
                 </WorkspaceGrid>
@@ -445,14 +540,14 @@ export default function DashboardView({ folderPathSegments = [] }: Props) {
 
 const PageWrapper = styled.div`
   min-height: calc(100vh - 48px);
-  padding: 0 8px;
+  padding: 0;
 
   @media (max-width: 768px) {
-    padding: 0 6px;
+    padding: 0;
   }
 
   @media (max-width: 640px) {
-    padding: 0 4px;
+    padding: 0;
   }
 `;
 
@@ -481,16 +576,17 @@ const Main = styled.div`
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  padding: 0 2px;
+  padding: 0;
+  flex: 1;
 
   @media (max-width: 768px) {
     gap: 8px;
-    padding: 0 2px;
+    padding: 0;
   }
 
   @media (max-width: 640px) {
     gap: 6px;
-    padding: 0 2px;
+    padding: 0;
   }
 `;
 
@@ -498,6 +594,7 @@ const TopActionsRow = styled.div`
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  gap: 12px;
   min-height: 42px;
   padding: 2px 0 0;
 
@@ -511,6 +608,18 @@ const TopActionsRow = styled.div`
   }
 `;
 
+const UserGreeting = styled.div`
+  font-size: 0.95rem;
+  color: #0f172a;
+  margin-right: auto;
+  font-weight: 500;
+
+  strong {
+    font-weight: 700;
+    color: #1b6f5c;
+  }
+`;
+
 const TopActionsSpacer = styled.div`
   flex: 1;
 `;
@@ -519,6 +628,8 @@ const WorkspaceGrid = styled.div`
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
   gap: 10px;
+  flex: 1;
+  min-height: 0;
 
   @media (max-width: 1180px) {
     grid-template-columns: 1fr;
@@ -537,7 +648,7 @@ const WorkspaceGrid = styled.div`
 
 
 
-const CenterCol = styled.div`min-width: 0;`;
+const CenterCol = styled.div`min-width: 0; display: flex; flex-direction: column;`;
 
 const RightRail = styled.div`
   display: grid;
@@ -545,9 +656,9 @@ const RightRail = styled.div`
   min-width: 0;
 `;
 
-const AnalyzingBanner = styled.div`
+const UploadProgressBanner = styled.div`
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
   margin-top: 4px;
   padding: 12px 16px;
@@ -559,13 +670,34 @@ const AnalyzingBanner = styled.div`
   color: #1b6f5c;
 `;
 
-const spin = keyframes`from{transform:rotate(0)}to{transform:rotate(360deg)}`;
-const AnalyzingSpinner = styled.div`
-  width: 16px;
-  height: 16px;
-  border: 2px solid #d4ece5;
-  border-top-color: #1b6f5c;
-  border-radius: 50%;
-  animation: ${spin} 0.8s linear infinite;
-  flex-shrink: 0;
+const UploadProgressHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+`;
+
+const UploadProgressTitle = styled.div`
+  font-weight: 700;
+  color: #0f172a;
+`;
+
+const UploadProgressLabel = styled.div`
+  font-variant-numeric: tabular-nums;
+  color: #1b6f5c;
+`;
+
+const UploadProgressTrack = styled.div`
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #d9e7e4;
+  overflow: hidden;
+`;
+
+const UploadProgressFill = styled.div`
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1b6f5c, #2ca07f);
+  transition: width 180ms ease;
 `;

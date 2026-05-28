@@ -19,13 +19,24 @@ import com.example.documind.entities.users.User;
 import com.example.documind.security.tokens.Token;
 import com.example.documind.security.tokens.TokenRepository;
 import com.example.documind.security.tokens.TokenService;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -157,6 +168,37 @@ public class FileService {
 				.orElseThrow(() -> new CustomException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "File not found."));
 		file.setLastAccess(LocalDateTime.now());
 		return fileMapper.toResponse(fileRepository.save(file));
+	}
+
+	@Transactional(readOnly = true)
+	public ResponseEntity<Resource> downloadFile(String token, Long fileId) {
+		String owner = requireOwnerFromToken(token);
+		File file = fileRepository.findByIdAndOwner(fileId, owner)
+				.orElseThrow(() -> new CustomException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "File not found."));
+
+		if (!StringUtils.hasText(file.getPath())) {
+			throw new CustomException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "File path not available.");
+		}
+
+		Path path = Paths.get(file.getPath());
+		if (!Files.exists(path) || !Files.isRegularFile(path)) {
+			throw new CustomException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "File not found on disk.");
+		}
+
+		Resource resource = new FileSystemResource(path);
+		String downloadName = sanitizeDownloadName(StringUtils.hasText(file.getName()) ? file.getName() : path.getFileName().toString());
+		MediaType mediaType = resolveMediaType(file.getMimeType(), path);
+
+		try {
+			return ResponseEntity.ok()
+					.contentType(mediaType)
+					.contentLength(Files.size(path))
+					.header(HttpHeaders.CONTENT_DISPOSITION,
+						ContentDisposition.attachment().filename(downloadName, StandardCharsets.UTF_8).build().toString())
+					.body(resource);
+		} catch (IOException ex) {
+			throw new CustomException(HttpStatus.INTERNAL_SERVER_ERROR, "DOWNLOAD_ERROR", "Unable to prepare file download.");
+		}
 	}
 
 	@Transactional
@@ -500,5 +542,33 @@ public class FileService {
 
 	private String normalizeTag(String tag) {
 		return StringUtils.hasText(tag) ? tag.trim().toLowerCase() : null;
+	}
+
+	private MediaType resolveMediaType(String mimeType, Path path) {
+		if (StringUtils.hasText(mimeType)) {
+			try {
+				return MediaType.parseMediaType(mimeType);
+			} catch (IllegalArgumentException ignored) {
+				// fallback below
+			}
+		}
+
+		try {
+			String probed = Files.probeContentType(path);
+			if (StringUtils.hasText(probed)) {
+				return MediaType.parseMediaType(probed);
+			}
+		} catch (IOException ignored) {
+			// fallback below
+		}
+
+		return MediaType.APPLICATION_OCTET_STREAM;
+	}
+
+	private String sanitizeDownloadName(String name) {
+		if (!StringUtils.hasText(name)) {
+			return "download";
+		}
+		return name.trim().replaceAll("[\\\\/]+", "_");
 	}
 }

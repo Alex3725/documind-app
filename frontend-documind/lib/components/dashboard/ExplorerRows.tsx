@@ -15,6 +15,7 @@ type FolderRowProps = {
   onDragOver?: (e: React.DragEvent) => void;
   onDragLeave?: () => void;
   onDrop?: (e: React.DragEvent) => void;
+  onDownload?: () => void;
   onTrash?: () => void;
   onMove?: () => void;
   onCopy?: () => void;
@@ -31,6 +32,7 @@ export function ExplorerFolderRow({
   onDragOver,
   onDragLeave,
   onDrop,
+  onDownload,
   onTrash,
   onMove,
   onCopy,
@@ -49,6 +51,7 @@ export function ExplorerFolderRow({
       <FolderName>{name}</FolderName>
       <FolderCount>{count}</FolderCount>
       <FolderActions>
+        {onDownload && <ActionBtn type="button" onClick={(e) => { e.stopPropagation(); onDownload(); }}>Scarica</ActionBtn>}
         {onMove && <ActionBtn type="button" onClick={(e) => { e.stopPropagation(); onMove(); }}>Sposta</ActionBtn>}
         {onCopy && <ActionBtn type="button" onClick={(e) => { e.stopPropagation(); onCopy(); }}>Copia</ActionBtn>}
         {onTrash && <DangerBtn type="button" onClick={(e) => { e.stopPropagation(); onTrash(); }}>Cestina</DangerBtn>}
@@ -69,6 +72,7 @@ type FileRowProps = {
   onRenameValueChange: (value: string) => void;
   onRenameConfirm: (fileId: string) => void;
   onRenameCancel: () => void;
+  onDownload?: () => void;
   onDelete: (fileId: string) => void;
   showTags?: boolean;
 };
@@ -84,6 +88,7 @@ export function ExplorerFileRowItem({
   onRenameValueChange,
   onRenameConfirm,
   onRenameCancel,
+  onDownload,
   onDelete,
   showTags = true,
 }: FileRowProps) {
@@ -117,6 +122,7 @@ export function ExplorerFileRowItem({
       <FileStatus>
         {file.userOverride ? "👤" : file.analysisResult.type === "CLASSIFIED" ? "✅" : "🤔"}
       </FileStatus>
+      {onDownload && <DownloadBtn type="button" onClick={onDownload}>⬇️</DownloadBtn>}
       <DeleteBtn onClick={() => onDelete(file.id)}>🗑️</DeleteBtn>
     </FileRow>
   );
@@ -242,6 +248,18 @@ const DeleteBtn = styled.button`
   cursor: pointer;
   opacity: 0.3;
   font-size: 0.8rem;
+  &:hover {
+    opacity: 1;
+  }
+`;
+
+const DownloadBtn = styled.button`
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.45;
+  font-size: 0.8rem;
+
   &:hover {
     opacity: 1;
   }

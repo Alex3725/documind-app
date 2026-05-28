@@ -96,6 +96,14 @@ public class FolderTypeController {
         return ResponseEntity.noContent().build();
     }
 
+    @GetMapping("/{folderId}/download")
+    public ResponseEntity<byte[]> downloadFolder(
+            @CookieValue(name = "authentication-token", required = false) String token,
+            @PathVariable Long folderId
+    ) {
+        return folderTypeService.downloadFolder(token, folderId);
+    }
+
     @PatchMapping("/{folderId}/restore")
     public ResponseEntity<FolderTypeResponse> restoreFolder(
             @CookieValue(name = "authentication-token", required = false) String token,

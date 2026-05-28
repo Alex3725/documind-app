@@ -4,16 +4,25 @@ import com.example.documind.configurations.exceptions.CustomException;
 import com.example.documind.dto.requests.FolderRelocateRequest;
 import com.example.documind.dto.requests.FolderTypeCreateRequest;
 import com.example.documind.dto.responses.FolderTypeResponse;
+import com.example.documind.entities.files.File;
+import com.example.documind.entities.files.FileRepository;
 import com.example.documind.security.tokens.Token;
 import com.example.documind.security.tokens.TokenRepository;
 import com.example.documind.security.tokens.TokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +33,8 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * FolderTypeService — Gestione delle cartelle semantiche.
@@ -44,15 +55,18 @@ public class FolderTypeService {
     private static final Pattern REFERENCE_PATTERN = Pattern.compile("\\[\\[(folder|tag):([^\\]]+)\\]\\]", Pattern.CASE_INSENSITIVE);
 
     private final FolderTypeRepository folderTypeRepository;
+    private final FileRepository fileRepository;
     private final TokenRepository tokenRepository;
     private final TokenService tokenService;
 
     public FolderTypeService(
             FolderTypeRepository folderTypeRepository,
+            FileRepository fileRepository,
             TokenRepository tokenRepository,
             TokenService tokenService
     ) {
         this.folderTypeRepository = folderTypeRepository;
+        this.fileRepository = fileRepository;
         this.tokenRepository = tokenRepository;
         this.tokenService = tokenService;
     }
@@ -183,6 +197,27 @@ public class FolderTypeService {
         logger.info("Deleting folder request: owner={}, folderId={}, fullPath={}, parentPath={}",
             owner, folderId, folder.getFullPath(), folder.getParentPath());
         trashSubtree(owner, folder.getFullPath());
+    }
+
+    @Transactional(readOnly = true)
+    public ResponseEntity<byte[]> downloadFolder(String token, Long folderId) {
+        String owner = requireOwner(token);
+        FolderType folder = folderTypeRepository.findByIdAndOwner(folderId, owner)
+                .orElseThrow(() -> new CustomException(HttpStatus.NOT_FOUND, "FOLDER_NOT_FOUND",
+                        "Cartella non trovata."));
+
+        byte[] archive = buildFolderArchive(owner, folder);
+        String downloadName = sanitizeDownloadName(StringUtils.hasText(folder.getName()) ? folder.getName() : extractName(folder.getFullPath()));
+        if (!downloadName.endsWith(".zip")) {
+            downloadName = downloadName + ".zip";
+        }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .contentLength(archive.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(downloadName, StandardCharsets.UTF_8).build().toString())
+                .body(archive);
     }
 
     @Transactional
@@ -498,6 +533,106 @@ public class FolderTypeService {
             return "";
         }
         return value.trim().toLowerCase();
+    }
+
+    private byte[] buildFolderArchive(String owner, FolderType folder) {
+        String rootPath = folder.getFullPath();
+        String rootName = sanitizeZipSegment(StringUtils.hasText(folder.getName()) ? folder.getName() : extractName(rootPath));
+
+        List<File> files = fileRepository.findAllByOwnerOrderByUploadDateDesc(owner).stream()
+                .filter(file -> belongsToFolder(file, rootPath))
+                .collect(Collectors.toList());
+
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream(); ZipOutputStream zipOut = new ZipOutputStream(baos)) {
+            if (files.isEmpty()) {
+                zipOut.putNextEntry(new ZipEntry(rootName + "/"));
+                zipOut.closeEntry();
+            }
+
+            for (File file : files) {
+                addFileToZip(zipOut, rootName, rootPath, file);
+            }
+
+            zipOut.finish();
+            return baos.toByteArray();
+        } catch (IOException ex) {
+            throw new CustomException(HttpStatus.INTERNAL_SERVER_ERROR, "DOWNLOAD_ERROR", "Unable to build folder archive.");
+        }
+    }
+
+    private void addFileToZip(ZipOutputStream zipOut, String rootName, String rootPath, File file) throws IOException {
+        if (file == null || !StringUtils.hasText(file.getPath())) {
+            return;
+        }
+
+        java.nio.file.Path source = java.nio.file.Paths.get(file.getPath());
+        if (!java.nio.file.Files.exists(source) || !java.nio.file.Files.isRegularFile(source)) {
+            throw new CustomException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "One of the files in the folder is missing on disk.");
+        }
+
+        String relativeFolder = resolveRelativeFolder(file.getFolderPath(), rootPath);
+        String fileName = sanitizeZipSegment(StringUtils.hasText(file.getName()) ? file.getName() : source.getFileName().toString());
+        String entryName = rootName + (StringUtils.hasText(relativeFolder) ? "/" + relativeFolder : "") + "/" + fileName;
+
+        zipOut.putNextEntry(new ZipEntry(entryName));
+        java.nio.file.Files.copy(source, zipOut);
+        zipOut.closeEntry();
+    }
+
+    private boolean belongsToFolder(File file, String rootPath) {
+        if (file == null || !StringUtils.hasText(file.getFolderPath()) || !StringUtils.hasText(rootPath)) {
+            return false;
+        }
+
+        String folderPath = file.getFolderPath().trim();
+        return folderPath.equals(rootPath) || folderPath.startsWith(rootPath + "/");
+    }
+
+    private String resolveRelativeFolder(String folderPath, String rootPath) {
+        if (!StringUtils.hasText(folderPath) || !StringUtils.hasText(rootPath)) {
+            return "";
+        }
+
+        String normalizedFolder = folderPath.trim();
+        if (normalizedFolder.equals(rootPath)) {
+            return "";
+        }
+
+        if (normalizedFolder.startsWith(rootPath + "/")) {
+            return sanitizeZipPath(normalizedFolder.substring(rootPath.length() + 1));
+        }
+
+        return sanitizeZipPath(normalizedFolder);
+    }
+
+    private String sanitizeZipPath(String path) {
+        if (!StringUtils.hasText(path)) {
+            return "";
+        }
+
+        String[] parts = path.trim().split("/");
+        List<String> sanitized = new ArrayList<>();
+        for (String part : parts) {
+            String cleaned = sanitizeZipSegment(part);
+            if (StringUtils.hasText(cleaned)) {
+                sanitized.add(cleaned);
+            }
+        }
+        return String.join("/", sanitized);
+    }
+
+    private String sanitizeZipSegment(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "item";
+        }
+        return value.trim().replaceAll("[\\\\/:*?\"<>|]+", "_");
+    }
+
+    private String sanitizeDownloadName(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "download.zip";
+        }
+        return value.trim().replaceAll("[\\\\/:*?\"<>|]+", "_");
     }
 
     // =====================================================

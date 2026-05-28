@@ -45,10 +45,11 @@ const Board = styled.section`
   border: 1px solid #dbe4e0;
   border-radius: 18px;
   padding: 14px;
-  min-height: 320px;
+  min-height: 600px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1;
 `;
 
 const HeaderRow = styled.div`
